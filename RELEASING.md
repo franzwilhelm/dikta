@@ -30,9 +30,9 @@ installasjonsskript med tilhørende kontrollsum, eller opprett en ny versjon.
 Kommandoen nedenfor forutsetter et offentlig repo og en ferdig gjennomgått commit:
 
 ```sh
-gh release create v0.5.1 dist/release/v0.5.1/* \
+gh release create v0.6.0 dist/release/v0.6.0/* \
   --repo franzwilhelm/dikta --target main \
-  --title 'Dikta 0.5.1' --notes-file RELEASE_NOTES.md
+  --title 'Dikta 0.6.0' --notes-file RELEASE_NOTES.md
 ```
 
 Den permanente installasjonskommandoen peker på siste publiserte release:
@@ -50,8 +50,8 @@ Avslutt Dikta først. Installer den genererte pakken i en midlertidig mappe:
 
 ```sh
 DIKTAT_INSTALL_DIR="$(mktemp -d)/Applications" \
-DIKTAT_ARCHIVE_PATH="$PWD/dist/release/v0.5.1/Dikta-0.5.1-macos-arm64.zip" \
-DIKTAT_NO_OPEN=1 bash dist/release/v0.5.1/install.sh
+DIKTAT_ARCHIVE_PATH="$PWD/dist/release/v0.6.0/Dikta-0.6.0-macos-arm64.zip" \
+DIKTAT_NO_OPEN=1 bash dist/release/v0.6.0/install.sh
 ```
 
 Dette bruker samme kontrollsum, utpakking, signaturkontroll og modellnedlasting

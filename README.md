@@ -22,7 +22,7 @@ For å oppdatere: avslutt Dikta og kjør samme kommando igjen.
 
 - **Start/stopp:** Ctrl + Option + mellomrom.
 - **Avbryt:** Escape eller × på panelet.
-- **Innstillinger:** Velg NB-Whisper eller Mac-diktasjon, norsk eller engelsk, og automatisk innliming eller bare kopiering.
+- **Innstillinger:** Velg NB-Whisper (Medium/Large) eller Mac-diktasjon, norsk eller engelsk, og automatisk innliming eller bare kopiering.
 - **Kopier igjen:** «Kopier siste tekst» i menyen.
 
 Tale behandles lokalt. Ingen opptakshistorikk lagres. Transkripsjonen kan inneholde feil eller utelatelser.

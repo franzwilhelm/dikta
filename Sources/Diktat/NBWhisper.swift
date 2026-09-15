@@ -1,18 +1,17 @@
 import Foundation
 import CWhisper
 
-// Model files live outside the app bundle, so updates do not copy 1.53 GB.
+// Model files live outside the app bundle and are reused across app updates.
 enum NBWhisperAssets {
     static var directory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Diktat/Models", isDirectory: true)
     }
-    static var model: URL { directory.appendingPathComponent("nb-whisper-medium.bin") }
     static var vad: URL { directory.appendingPathComponent("silero-v6.2.0.bin") }
-    static func validate() throws {
-        for url in [model, vad] {
+    static func validate(_ model: WhisperModel) throws {
+        for url in [model.file, vad] {
             guard FileManager.default.isReadableFile(atPath: url.path) else {
-                throw DiktatError(message: "NB-Whisper-modellen mangler. Kjør modellinstallasjonen, eller velg Apple i menyen.")
+                throw DiktatError(message: "NB-Whisper-modellen mangler. Kjør modellinstallasjonen, eller velg Mac-diktasjon i menyen.")
             }
         }
     }
@@ -37,10 +36,16 @@ private actor WhisperWorker {
     let handle: WhisperHandle
     init(handle: WhisperHandle) { self.handle = handle }
 
-    func prepare() throws {
-        let result = diktat_whisper_load(handle.pointer, NBWhisperAssets.model.path)
+    private var loadedModel: WhisperModel?
+
+    func prepare(_ model: WhisperModel) throws {
+        if loadedModel == model { return }
+        diktat_whisper_unload(handle.pointer)
+        loadedModel = nil
+        let result = diktat_whisper_load(handle.pointer, model.file.path)
         if result == -2 { throw CancellationError() }
         guard result == 0 else { throw DiktatError(message: "Kunne ikke laste NB-Whisper-modellen.") }
+        loadedModel = model
     }
 
     func transcribe(_ samples: [Float], locale: String) throws -> [WhisperWord] {
@@ -60,7 +65,10 @@ private actor WhisperWorker {
     }
 
     func waitUntilIdle() {}
-    func unload() { diktat_whisper_unload(handle.pointer) }
+    func unload() {
+        diktat_whisper_unload(handle.pointer)
+        loadedModel = nil
+    }
 }
 
 @MainActor
@@ -70,9 +78,10 @@ final class NBWhisper {
     private let handle = WhisperHandle()
     private lazy var worker = WhisperWorker(handle: handle)
 
-    func prepare() async throws {
-        try NBWhisperAssets.validate()
-        try await worker.prepare()
+    func prepare(model: WhisperModel? = nil) async throws {
+        let chosen = model ?? WhisperModels.shared.availableModel
+        try NBWhisperAssets.validate(chosen)
+        try await worker.prepare(chosen)
         try Task.checkCancellation()
     }
 

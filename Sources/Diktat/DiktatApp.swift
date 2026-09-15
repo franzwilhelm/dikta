@@ -20,7 +20,7 @@ struct DiktatApp: App {
                 Text("English (US)").tag("en-US")
             }.disabled(controller.isBusy)
             Picker("Talemotor", selection: $controller.useNBWhisper) {
-                Text("NB-Whisper Medium").tag(true)
+                Text("NB-Whisper").tag(true)
                 Text("Mac-diktasjon").tag(false)
             }.disabled(controller.isBusy)
             Toggle("Lim inn automatisk", isOn: $controller.automaticallyPaste)
@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showSettings(controller: SessionController) {
         if settingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 560),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 720),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Dikta – innstillinger"
             window.isReleasedWhenClosed = false
@@ -87,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 private struct SettingsView: View {
     @ObservedObject var controller: SessionController
+    @ObservedObject private var models = WhisperModels.shared
     @State private var permissionMessage = ""
     var body: some View {
         Form {
@@ -96,7 +97,7 @@ private struct SettingsView: View {
                     Text("English (US)").tag("en-US")
                 }
                 Picker("Talemotor", selection: $controller.useNBWhisper) {
-                    Text("NB-Whisper Medium").tag(true)
+                    Text("NB-Whisper").tag(true)
                     Text("Mac-diktasjon").tag(false)
                 }
                 Text("Whisper behandler 20 sekunder om gangen mens du snakker. Ved stopp ferdigstilles bare køen og den siste resten.")
@@ -105,6 +106,24 @@ private struct SettingsView: View {
                 Text("Når valget er av, kopieres teksten bare. Teksten beholdes på utklippstavlen i begge modi.")
                     .font(.caption).foregroundStyle(.secondary)
             }.disabled(controller.isBusy)
+            if controller.useNBWhisper {
+                Section("Whisper-modell") {
+                    Picker("Modell", selection: $models.selected) {
+                        Text("Medium · 1,53 GB").tag(WhisperModel.medium)
+                        Text("Large · 3,10 GB").tag(WhisperModel.large)
+                    }
+                    if models.isDownloading { ProgressView(value: models.progress) }
+                    Text(models.status).font(.caption).foregroundStyle(.secondary)
+                    if models.isDownloading {
+                        Text("Medium brukes mens nedlastingen pågår. Large krever mer minne og behandlingstid.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Avbryt nedlasting") { models.cancelDownload() }
+                    } else if !models.selected.isInstalled {
+                        if let error = models.error { Text(error).font(.caption).foregroundStyle(.red) }
+                        Button("Prøv nedlasting igjen") { models.ensureSelected() }
+                    }
+                }
+            }
             Section("Hurtigtaster") {
                 KeyboardShortcuts.Recorder("Start / stopp", name: .toggleDictation)
                 KeyboardShortcuts.Recorder("Avbryt", name: .cancelDictation)
@@ -134,7 +153,7 @@ private struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 560)
+        .frame(width: 480, height: 720)
         .task {
             while !Task.isCancelled {
                 controller.refreshAccessibility()

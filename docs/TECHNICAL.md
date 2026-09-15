@@ -1,6 +1,19 @@
 # Teknisk oversikt
 
-## NB-Whisper Medium
+## NB-Whisper-modeller
+
+Medium er standard. Innstillingene tilbyr også Large, som lastes ned av appen i
+bakgrunnen med URLSession. SHA-256 beregnes utenfor hovedtråden før filen gjøres
+tilgjengelig. Fremdrift, avbryt og forsøk på nytt vises i innstillingene.
+Appen må være åpen under nedlastingen; en avbrutt nedlasting starter på nytt ved
+nytt forsøk. Medium brukes mens den valgte modellen mangler. Hver økt låser sitt
+modellvalg ved start; en ferdig nedlasting bytter aldri motor midt i opptaket.
+Modellen i minnet erstattes ved neste økt, uten å holde begge lastet samtidig.
+
+Large bruker fullpresisjonsfilen på 3 095 033 483 byte fra
+[Nasjonalbiblioteket](https://huggingface.co/NbAiLab/nb-whisper-large/blob/8c6249fdeeb4dcd05e5735a4c39640607eb6e4ac/ggml-model.bin),
+revisjon `8c6249fdeeb4dcd05e5735a4c39640607eb6e4ac`, SHA-256
+`0f2f66f22e11a7c7da3c582d8e5c89cb2c0011753ba9c7c9731e320a4ba33e76`.
 
 Whisper behandler 20 sekunder ny lyd om gangen mens du snakker. Etter første
 bolk tas fire sekunder fra forrige bolk med som overlapp. Modellen forhåndslastes ved appstart og beholdes i minnet mellom økter.

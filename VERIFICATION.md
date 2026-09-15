@@ -196,3 +196,21 @@ og ventetid må prøves med reell bruk; overlapp garanterer ikke at all tale bli
   fjernet den gamle appen med matching identitet og gjenbrukte begge modellene.
   Info.plist viser Dikta; signaturkontroll besto.
 - README er redusert til 30 linjer; tekniske detaljer ligger i docs/TECHNICAL.md.
+
+## Valg av NB-Whisper Large, 16. september 2026
+
+- Medium/Large-valg med lagring i brukerinnstillinger, bakgrunnsnedlasting,
+  bytefremdrift, avbryt og nytt forsøk. Pågående økter låser modellvalget ved start.
+- Large-filen (3 095 033 483 byte) ble lastet ned i appen og SHA-256-kontrollert
+  før installasjon. Medium var tilgjengelig mens nedlastingen pågikk.
+- Large lastet og transkriberte 20 sekunder av den eksisterende syntetiske norske
+  prøvefilen (45 ordobjekter). Deretter lastet og transkriberte Medium samme lyd.
+  Appen avsluttet normalt. Det opprinnelige modellvalget ble gjenopprettet.
+- Den første async-URLSession-varianten ga ikke bytecallbacker. Den ble erstattet
+  med eksplisitt URLSessionDownloadTask/delegate. Den endelige nedlastingsklassen
+  rapporterte 14 416, 96 291, 622 538 og 885 098 byte ved en fersk VAD-nedlasting.
+  Avbryt av en aktiv nedlasting returnerte NSURLErrorCancelled (-999).
+- Filkontrollen går utenfor hovedtråden. Nedlastingen bruker midlertidig fil;
+  bare en fil med riktig størrelse og SHA-256 gjøres tilgjengelig som modell.
+- Ingen testfiler er opprettet. Diagnosekoden er fjernet før release. Feil checksum,
+  nettbrudd og selve visningen i innstillingsvinduet er ikke manuelt fremprovosert.

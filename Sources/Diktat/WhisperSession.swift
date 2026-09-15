@@ -94,6 +94,7 @@ final class WhisperSession: DictationSession {
     var onStatus: ((String) -> Void)?
     private let engine = AVAudioEngine()
     private let whisper = NBWhisper.shared
+    private let model = WhisperModels.shared.availableModel
     private var feed: AudioFeed?
     private var worker: Task<Void, Error>?
     private var observer: NSObjectProtocol?
@@ -149,7 +150,7 @@ final class WhisperSession: DictationSession {
         worker = Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.whisper.prepare()
+                try await self.whisper.prepare(model: self.model)
                 try self.checkCancellation()
                 for try await chunk in stream {
                     try self.checkCancellation()
