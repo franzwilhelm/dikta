@@ -5,11 +5,11 @@ VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PROJ
 REPOSITORY="${DIKTAT_REPOSITORY:-franzwilhelm/dikta}"
 BASE_URL="${DIKTAT_RELEASE_BASE_URL:-https://github.com/$REPOSITORY/releases/download/v$VERSION}"
 OUT="$PROJECT_DIR/dist/release/v$VERSION"
-ARCHIVE="Diktat-$VERSION-macos-arm64.zip"
+ARCHIVE="Dikta-$VERSION-macos-arm64.zip"
 "$PROJECT_DIR/scripts/package-app.sh"
 mkdir -p "$OUT"
 rm -f "$OUT/$ARCHIVE"
-ditto -c -k --sequesterRsrc --keepParent "$PROJECT_DIR/dist/Diktat.app" "$OUT/$ARCHIVE"
+ditto -c -k --sequesterRsrc --keepParent "$PROJECT_DIR/dist/Dikta.app" "$OUT/$ARCHIVE"
 SHA="$(shasum -a 256 "$OUT/$ARCHIVE" | awk '{print $1}')"
 {
     printf '#!/bin/bash\nset -euo pipefail\n'

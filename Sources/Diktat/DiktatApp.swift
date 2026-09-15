@@ -31,10 +31,10 @@ struct DiktatApp: App {
             }
             Divider()
             Button("Innstillinger …") { delegate.showSettings(controller: controller) }
-            Button("Avslutt Diktat") { controller.quit() }
+            Button("Avslutt Dikta") { controller.quit() }
         } label: {
             Image(systemName: controller.phase == .recording ? "mic.fill" : "mic")
-                .accessibilityLabel("Diktat: \(controller.message)")
+                .accessibilityLabel("Dikta: \(controller.message)")
                 .onAppear {
                     if !UserDefaults.standard.bool(forKey: "hasOpenedSettings") {
                         UserDefaults.standard.set(true, forKey: "hasOpenedSettings")
@@ -74,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 560),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = "Diktat – innstillinger"
+            window.title = "Dikta – innstillinger"
             window.isReleasedWhenClosed = false
             window.contentView = NSHostingView(rootView: SettingsView(controller: controller))
             window.center()
@@ -113,7 +113,7 @@ private struct SettingsView: View {
                 Button("Gi mikrofontilgang") {
                     Task {
                         let granted = await AVCaptureDevice.requestAccess(for: .audio)
-                        permissionMessage = granted ? "Mikrofonen er klar." : "Aktiver Mikrofon for Diktat i Systeminnstillinger."
+                        permissionMessage = granted ? "Mikrofonen er klar." : "Aktiver Mikrofon for Dikta i Systeminnstillinger."
                         if !granted { openPrivacy("Privacy_Microphone") }
                     }
                 }
@@ -122,7 +122,7 @@ private struct SettingsView: View {
                     systemImage: controller.accessibilityGranted ? "checkmark.circle.fill" : "exclamationmark.triangle"
                 )
                 if !controller.accessibilityGranted {
-                    Text("Slå på Diktat i Systeminnstillinger → Personvern og sikkerhet → Tilgjengelighet. Bruk + og velg Diktat i Programmer-mappen din hvis appen mangler i listen.")
+                    Text("Slå på Dikta i Systeminnstillinger → Personvern og sikkerhet → Tilgjengelighet. Bruk + og velg Dikta i Programmer-mappen din hvis appen mangler i listen.")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Åpne Tilgjengelighet …") {
                         controller.requestAutomaticPasteAccess()

@@ -187,3 +187,12 @@ og ventetid må prøves med reell bruk; overlapp garanterer ikke at all tale bli
 - Ingen tester er opprettet. Installasjon på en annen Mac, Gatekeeper hos teamet
   og avbrudd midt i en stor modellnedlasting er ikke manuelt kontrollert.
   Developer ID og notarisering er foreløpig ikke tilgjengelig.
+
+## Dikta 0.5.1
+
+- Appnavn, kjørbar fil, paneltekster og releasepakke heter Dikta. Eksisterende
+  bundle-ID og modellmappe er beholdt for å videreføre innstillinger og modeller.
+- Installereren oppgraderte en tidligere Diktat.app i isolert mappe til Dikta.app,
+  fjernet den gamle appen med matching identitet og gjenbrukte begge modellene.
+  Info.plist viser Dikta; signaturkontroll besto.
+- README er redusert til 30 linjer; tekniske detaljer ligger i docs/TECHNICAL.md.

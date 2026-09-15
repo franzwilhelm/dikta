@@ -1,7 +1,7 @@
 # Utgivelser
 
-Repo: `franzwilhelm/dikta`. Appnavnet og eksisterende appidentitet er fortsatt
-Diktat / `no.franzvonderlippe.Diktat`, slik at lokale innstillinger beholdes.
+Repo: `franzwilhelm/dikta`. Appnavnet er Dikta. Den eksisterende appidentiteten beholdes som
+`no.franzvonderlippe.Diktat`, slik at lokale innstillinger beholdes.
 
 ## Lag app og installasjonsskript
 
@@ -13,7 +13,7 @@ På Apple Silicon med Swift Command Line Tools, CMake og Git:
 
 Utgivelsen inneholder bare:
 
-- `Diktat-<VERSJON>-macos-arm64.zip`: app med ikon, native whisper.cpp-kjøretid og lisenser.
+- `Dikta-<VERSJON>-macos-arm64.zip`: app med ikon, native whisper.cpp-kjøretid og lisenser.
 - `install.sh`: selvstendig installasjonsskript med fast URL og SHA-256 for akkurat denne apppakken.
 - `SHA256SUMS`: kontrollsummer for de to filene.
 
@@ -30,9 +30,9 @@ installasjonsskript med tilhørende kontrollsum, eller opprett en ny versjon.
 Kommandoen nedenfor forutsetter et offentlig repo og en ferdig gjennomgått commit:
 
 ```sh
-gh release create v0.5.0 dist/release/v0.5.0/* \
+gh release create v0.5.1 dist/release/v0.5.1/* \
   --repo franzwilhelm/dikta --target main \
-  --title 'Diktat 0.5.0' --notes-file RELEASE_NOTES.md
+  --title 'Dikta 0.5.1' --notes-file RELEASE_NOTES.md
 ```
 
 Den permanente installasjonskommandoen peker på siste publiserte release:
@@ -46,12 +46,12 @@ krever en autentisert nedlastingsflyt; curl-kommandoen over fungerer ikke anonym
 
 ## Lokal kontroll uten publisering
 
-Avslutt Diktat først. Installer den genererte pakken i en midlertidig mappe:
+Avslutt Dikta først. Installer den genererte pakken i en midlertidig mappe:
 
 ```sh
 DIKTAT_INSTALL_DIR="$(mktemp -d)/Applications" \
-DIKTAT_ARCHIVE_PATH="$PWD/dist/release/v0.5.0/Diktat-0.5.0-macos-arm64.zip" \
-DIKTAT_NO_OPEN=1 bash dist/release/v0.5.0/install.sh
+DIKTAT_ARCHIVE_PATH="$PWD/dist/release/v0.5.1/Dikta-0.5.1-macos-arm64.zip" \
+DIKTAT_NO_OPEN=1 bash dist/release/v0.5.1/install.sh
 ```
 
 Dette bruker samme kontrollsum, utpakking, signaturkontroll og modellnedlasting

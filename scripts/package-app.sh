@@ -2,14 +2,14 @@
 set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_ID="no.franzvonderlippe.Diktat"
-APP_DIR="$PROJECT_DIR/dist/Diktat.app"
+APP_DIR="$PROJECT_DIR/dist/Dikta.app"
 "$PROJECT_DIR/scripts/prepare-native.sh"
 BIN_DIR="$(swift build --package-path "$PROJECT_DIR" -c release --show-bin-path)"
 # SwiftPM does not track changes to the externally built static archives.
-rm -f "$BIN_DIR/Diktat"
+rm -f "$BIN_DIR/Dikta"
 swift build --package-path "$PROJECT_DIR" -c release
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
-cp "$BIN_DIR/Diktat" "$APP_DIR/Contents/MacOS/Diktat"
+cp "$BIN_DIR/Dikta" "$APP_DIR/Contents/MacOS/Dikta"
 "$PROJECT_DIR/scripts/build-icon.sh"
 cp "$PROJECT_DIR/.build/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 rm -f "$APP_DIR/Contents/Helpers/whisper-cli"

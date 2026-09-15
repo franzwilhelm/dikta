@@ -116,7 +116,7 @@ final class WhisperSession: DictationSession {
 
     func start(locale: String, status: (String) -> Void) async throws {
         guard await AVCaptureDevice.requestAccess(for: .audio) else {
-            throw DiktatError(message: "Mikrofontilgang mangler. Gi Diktat tilgang i Systeminnstillinger.")
+            throw DiktatError(message: "Mikrofontilgang mangler. Gi Dikta tilgang i Systeminnstillinger.")
         }
         try checkCancellation()
         status("Klargjør mikrofon …")

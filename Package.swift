@@ -10,9 +10,9 @@ let libraries = [
 ].map { native + $0 }
 
 let package = Package(
-    name: "Diktat",
+    name: "Dikta",
     platforms: [.macOS(.v26)],
-    products: [.executable(name: "Diktat", targets: ["Diktat"])],
+    products: [.executable(name: "Dikta", targets: ["Diktat"])],
     dependencies: [
         .package(path: "Vendor/KeyboardShortcuts")
     ],

@@ -41,7 +41,7 @@ final class TextDelivery {
         guard Self.copy(text) else { return "Kunne ikke kopiere teksten. Prøv «Kopier siste tekst»." }
         guard automaticallyPaste else { return "Teksten er kopiert." }
         guard AXIsProcessTrusted() else {
-            return "Kopiert. Gi Diktat tilgang til Tilgjengelighet for automatisk innliming."
+            return "Kopiert. Gi Dikta tilgang til Tilgjengelighet for automatisk innliming."
         }
         let pasteboardVersion = NSPasteboard.general.changeCount
         // Wait at most two seconds for shortcut modifiers to be released.
