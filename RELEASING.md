@@ -15,7 +15,21 @@ Utgivelsen inneholder bare:
 
 - `Dikta-<VERSJON>-macos-arm64.zip`: app med ikon, native whisper.cpp-kjøretid og lisenser.
 - `install.sh`: selvstendig installasjonsskript med fast URL og SHA-256 for akkurat denne apppakken.
-- `SHA256SUMS`: kontrollsummer for de to filene.
+- `appcast.xml`: Sparkle-feed som installerte apper bruker for å oppdatere seg selv.
+- `SHA256SUMS`: kontrollsummer for de tre filene.
+
+## Oppdateringer i appen (Sparkle)
+
+Installerte apper sjekker `releases/latest/download/appcast.xml` én gang i døgnet og
+har menyvalget «Se etter oppdateringer …». Oppdateringen bytter bare ut appen i
+`~/Applications`; modeller og innstillinger i Application Support røres ikke.
+
+`release.sh` signerer arkivet med EdDSA-nøkkelen i utgivelsesmaskinens nøkkelring
+(laget med `.build/artifacts/sparkle/Sparkle/bin/generate_keys`). Den offentlige
+nøkkelen står som `SUPublicEDKey` i `Resources/Info.plist`. Byttes maskin, eksporter
+nøkkelen med `generate_keys -x fil` og importer med `generate_keys -f fil`; mistes den,
+kan ikke eksisterende installasjoner oppdatere seg via Sparkle. Last alltid opp
+`appcast.xml` sammen med arkivet, ellers peker feeden på forrige versjon.
 
 **Ingen modeller eller opptak ligger i arkivet.** Utgivelsesbygging laster heller
 ikke ned språkmodellene. `scripts/download-models.sh` og det genererte skriptet
@@ -30,9 +44,9 @@ installasjonsskript med tilhørende kontrollsum, eller opprett en ny versjon.
 Kommandoen nedenfor forutsetter et offentlig repo og en ferdig gjennomgått commit:
 
 ```sh
-gh release create v0.6.0 dist/release/v0.6.0/* \
+gh release create v0.7.0 dist/release/v0.7.0/* \
   --repo franzwilhelm/dikta --target main \
-  --title 'Dikta 0.6.0' --notes-file RELEASE_NOTES.md
+  --title 'Dikta 0.7.0' --notes-file RELEASE_NOTES.md
 ```
 
 Den permanente installasjonskommandoen peker på siste publiserte release:
@@ -50,8 +64,8 @@ Avslutt Dikta først. Installer den genererte pakken i en midlertidig mappe:
 
 ```sh
 DIKTAT_INSTALL_DIR="$(mktemp -d)/Applications" \
-DIKTAT_ARCHIVE_PATH="$PWD/dist/release/v0.6.0/Dikta-0.6.0-macos-arm64.zip" \
-DIKTAT_NO_OPEN=1 bash dist/release/v0.6.0/install.sh
+DIKTAT_ARCHIVE_PATH="$PWD/dist/release/v0.7.0/Dikta-0.7.0-macos-arm64.zip" \
+DIKTAT_NO_OPEN=1 bash dist/release/v0.7.0/install.sh
 ```
 
 Dette bruker samme kontrollsum, utpakking, signaturkontroll og modellnedlasting

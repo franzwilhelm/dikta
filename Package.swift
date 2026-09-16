@@ -14,7 +14,8 @@ let package = Package(
     platforms: [.macOS(.v26)],
     products: [.executable(name: "Dikta", targets: ["Diktat"])],
     dependencies: [
-        .package(path: "Vendor/KeyboardShortcuts")
+        .package(path: "Vendor/KeyboardShortcuts"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0")
     ],
     targets: [
         .target(name: "CWhisper", publicHeadersPath: "include", cxxSettings: [
@@ -23,7 +24,12 @@ let package = Package(
             .unsafeFlags(libraries), .linkedFramework("Accelerate"),
             .linkedFramework("Metal"), .linkedFramework("MetalKit"), .linkedFramework("Foundation")
         ]),
-        .executableTarget(name: "Diktat", dependencies: ["KeyboardShortcuts", "CWhisper"])
+        .executableTarget(name: "Diktat", dependencies: [
+            "KeyboardShortcuts", "CWhisper", .product(name: "Sparkle", package: "Sparkle")
+        ], linkerSettings: [
+            // Sparkle.framework is copied to Contents/Frameworks by scripts/package-app.sh.
+            .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])
+        ])
     ],
     cxxLanguageStandard: .cxx17
 )

@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import SwiftUI
 import KeyboardShortcuts
+import Sparkle
 
 @main
 struct DiktatApp: App {
@@ -31,6 +32,8 @@ struct DiktatApp: App {
             }
             Divider()
             Button("Innstillinger …") { delegate.showSettings(controller: controller) }
+            Button("Se etter oppdateringer …") { delegate.checkForUpdates() }
+                .disabled(!delegate.canCheckForUpdates)
             Button("Avslutt Dikta") { controller.quit() }
         } label: {
             Image(systemName: controller.phase == .recording ? "mic.fill" : "mic")
@@ -47,8 +50,20 @@ struct DiktatApp: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var settingsWindow: NSWindow?
+    // Sparkle reads SUFeedURL and SUPublicEDKey from Info.plist and checks in the background.
+    private let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    @Published private(set) var canCheckForUpdates = false
+
+    override init() {
+        super.init()
+        updater.updater.publisher(for: \.canCheckForUpdates).assign(to: &$canCheckForUpdates)
+    }
+
+    func checkForUpdates() {
+        updater.checkForUpdates(nil)
+    }
 
     private var readyToTerminate = false
     private var shuttingDown = false

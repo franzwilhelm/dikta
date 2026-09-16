@@ -32,7 +32,7 @@ private final class ConverterInput: @unchecked Sendable {
 // with an in-flight callback, so the final audio is yielded before stream finish.
 final class AudioFeed: @unchecked Sendable {
     private let lock = NSLock()
-    private let converter: AVAudioConverter
+    private var converter: AVAudioConverter
     private let format: AVAudioFormat
     private let consume: @Sendable (AVAudioPCMBuffer) throws -> Void
     private let end: @Sendable (Error?) -> Void
@@ -65,6 +65,14 @@ final class AudioFeed: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard !ended else { return }
+        // The input device can change mid-session (e.g. a headset connects); follow its format.
+        if input.format != converter.inputFormat {
+            guard let replacement = AVAudioConverter(from: input.format, to: format) else {
+                fail(DiktatError(message: "Mikrofonens lydformat kan ikke konverteres."))
+                return
+            }
+            converter = replacement
+        }
         meterSeconds += Double(input.frameLength) / input.format.sampleRate
         if meterSeconds >= 0.05, let channel = input.floatChannelData?[0], input.frameLength > 0 {
             meterSeconds = 0

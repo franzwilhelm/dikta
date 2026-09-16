@@ -176,13 +176,28 @@ final class WhisperSession: DictationSession {
         observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
                                                           object: engine, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, !self.cancelled, self.tapInstalled else { return }
-                self.onFailure?(DiktatError(message: "Mikrofonen ble endret. Ferdig tekst er bevart."))
+                self?.followInputChange()
             }
         }
         engine.prepare()
         try engine.start()
         startedAt = Date()
+    }
+
+    // The engine stops when the input device changes (e.g. a headset connects).
+    // Re-tap the new device and keep recording instead of failing the session.
+    private func followInputChange() {
+        guard !cancelled, !finishing, tapInstalled, let feed else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        let input = engine.inputNode.outputFormat(forBus: 0)
+        guard input.sampleRate > 0, input.channelCount > 0 else {
+            tapInstalled = false
+            onFailure?(DiktatError(message: "Mikrofonen ble koblet fra. Ferdig tekst er bevart."))
+            return
+        }
+        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: input, block: feed.makeTap())
+        do { try engine.start() }
+        catch { onFailure?(DiktatError(message: "Mikrofonen ble endret og kunne ikke startes igjen. Ferdig tekst er bevart.")) }
     }
 
     private func statusText(processing: Bool) -> String {

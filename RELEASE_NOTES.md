@@ -1,9 +1,8 @@
-Velg **Medium eller Large** under Whisper-modell i innstillingene.
+Dikta oppdaterer seg nå selv, og bytte av mikrofon avbryter ikke lenger diktasjonen.
 
-- Large lastes ned i bakgrunnen når den velges, med nedlastingsstatus i innstillingene.
-- Nedlastingen kan avbrytes eller prøves igjen ved feil. Modellfilen kontrolleres med SHA-256.
-- Medium brukes inntil Large er klar. Pågående opptak bytter aldri modell underveis.
-- Nedlastede modeller og modellvalget beholdes mellom appstarter.
+- Nytt menyvalg «Se etter oppdateringer …». Appen sjekker også automatisk én gang i døgnet.
+- Oppdateringer bytter bare ut appen. Nedlastede modeller og innstillinger beholdes.
+- Kobles et headset til eller fra under opptak, fortsetter Dikta på den nye mikrofonen med teksten intakt.
 
-Large er en separat nedlasting på ca. 3,10 GB og krever mer minne og behandlingstid.
-Installasjonskommandoen laster fortsatt bare ned Medium som standard.
+Denne versjonen må installeres med installasjonskommandoen én siste gang. Fra og med
+0.7.0 kommer nye versjoner via appen.
