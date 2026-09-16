@@ -17,11 +17,14 @@ final class AppleSpeechSession: DictationSession {
     var onFailure: ((Error) -> Void)?
     var onStatus: ((String) -> Void)?
     var processingProgress: Double { 0 } // Apple exposes no finalization progress.
-    var finalizationTimeout: Double { 30 }
+    private var fileSeconds = 0.0
+    var finalizationTimeout: Double { max(30, fileSeconds * 2) }
 
-    func start(locale identifier: String, status: (String) -> Void) async throws {
-        guard await AVCaptureDevice.requestAccess(for: .audio) else {
-            throw DiktatError(message: "Mikrofontilgang mangler. Åpne Systeminnstillinger → Personvern og sikkerhet → Mikrofon.")
+    func start(source: AudioSource, locale identifier: String, status: (String) -> Void) async throws {
+        if !source.isFile {
+            guard await AVCaptureDevice.requestAccess(for: .audio) else {
+                throw DiktatError(message: "Mikrofontilgang mangler. Åpne Systeminnstillinger → Personvern og sikkerhet → Mikrofon.")
+            }
         }
         try checkCancellation()
         guard let locale = await DictationTranscriber.supportedLocale(equivalentTo: Locale(identifier: identifier)) else {
@@ -36,9 +39,31 @@ final class AppleSpeechSession: DictationSession {
             try await request.downloadAndInstall()
         }
         try checkCancellation()
-        status("Klargjør mikrofon …")
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
+        resultsTask = Task { [weak self] in
+            do {
+                for try await result in transcriber.results {
+                    guard let self, !self.cancelled else { return }
+                    self.buffer.update(result)
+                    self.onText?(self.buffer.text)
+                }
+            } catch {
+                if let self, !self.cancelled { self.onFailure?(error) }
+                throw error
+            }
+        }
+        switch source {
+        case .microphone:
+            try await startMicrophone(analyzer: analyzer, transcriber: transcriber, status: status)
+        case .file(let url):
+            try await startFile(url, analyzer: analyzer, transcriber: transcriber, status: status)
+        }
+    }
+
+    private func startMicrophone(analyzer: SpeechAnalyzer, transcriber: DictationTranscriber,
+                                 status: (String) -> Void) async throws {
+        status("Klargjør mikrofon …")
         let input = engine.inputNode.outputFormat(forBus: 0)
         guard input.sampleRate > 0, input.channelCount > 0 else {
             throw DiktatError(message: "Ingen tilgjengelig mikrofon.")
@@ -62,18 +87,6 @@ final class AppleSpeechSession: DictationSession {
             continuation.finish(throwing: error)
         })
         self.feed = feed
-        resultsTask = Task { [weak self] in
-            do {
-                for try await result in transcriber.results {
-                    guard let self, !self.cancelled else { return }
-                    self.buffer.update(result)
-                    self.onText?(self.buffer.text)
-                }
-            } catch {
-                if let self, !self.cancelled { self.onFailure?(error) }
-                throw error
-            }
-        }
         try await analyzer.start(inputSequence: stream)
         try checkCancellation()
         engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: input, block: feed.makeTap())
@@ -87,6 +100,30 @@ final class AppleSpeechSession: DictationSession {
         }
         engine.prepare()
         try engine.start()
+    }
+
+    // The whole file is decoded into the analyzer's format and queued before finish().
+    private func startFile(_ url: URL, analyzer: SpeechAnalyzer, transcriber: DictationTranscriber,
+                           status: (String) -> Void) async throws {
+        status("Leser lydfil …")
+        fileSeconds = try AudioFileDecoder.duration(of: url)
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
+            throw DiktatError(message: "Fant ikke et støttet lydformat.")
+        }
+        try await analyzer.prepareToAnalyze(in: format)
+        try checkCancellation()
+        let (stream, continuation) = AsyncThrowingStream<AnalyzerInput, Error>.makeStream(bufferingPolicy: .unbounded)
+        try await analyzer.start(inputSequence: stream)
+        do {
+            try await AudioFileDecoder.decode(url, to: format) { buffer in
+                continuation.yield(AnalyzerInput(buffer: buffer))
+            }
+        } catch {
+            continuation.finish(throwing: error)
+            throw error
+        }
+        try checkCancellation()
+        continuation.finish()
     }
 
     // The engine stops when the input device changes (e.g. a headset connects).

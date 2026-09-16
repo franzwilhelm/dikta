@@ -13,8 +13,9 @@ final class WhisperChunks: @unchecked Sendable {
     private var samples: [Float] = []
     // Read by the session only after AudioFeed.finish has joined the audio callback.
     private(set) var submittedSamples = 0
+    private(set) var submittedBlocks = 0
     private var start = 0.0
-    private var nextCount = 20 * 16_000
+    private var nextCount = 30 * 16_000
     private let overlap = 4 * 16_000
 
     init(_ continuation: AsyncThrowingStream<WhisperChunk, Error>.Continuation) {
@@ -30,13 +31,14 @@ final class WhisperChunks: @unchecked Sendable {
             try yield(WhisperChunk(samples: Array(samples.prefix(nextCount)), start: start, isFinal: false))
             samples.removeFirst(nextCount - overlap)
             start += Double(nextCount - overlap) / 16_000
-            nextCount = 24 * 16_000 // 20 seconds of new audio plus 4 seconds of context.
+            nextCount = 34 * 16_000 // 30 seconds of new audio plus 4 seconds of context.
         }
     }
 
     private func yield(_ chunk: WhisperChunk) throws {
         if chunk.isFinal, chunk.start > 0, chunk.samples.count == overlap { return }
         submittedSamples += chunk.samples.count
+        submittedBlocks += 1
         if case .dropped = continuation.yield(chunk) {
             throw DiktatError(message: "Whisper-køen ble for lang. Opptaket er stoppet; ferdig tekst kan kopieres.")
         }
@@ -108,28 +110,44 @@ final class WhisperSession: DictationSession {
     private var totalSamples = 0
     private var completedSamples = 0
     private var currentSamples = 0
+    private var isFile = false
+    private var totalBlocks = 0
     var processingProgress: Double {
         guard totalSamples > 0 else { return 0 }
         let done = Double(completedSamples) + Double(currentSamples) * whisper.progress
         return min(0.99, done / Double(totalSamples))
     }
-    var finalizationTimeout: Double { 180 * 10 } // Bounded queue: at most 8 queued blocks plus tail/current.
+    var finalizationTimeout: Double {
+        // Microphone: bounded queue of at most 8 blocks plus tail/current.
+        // File: allow three times real time, and never less than the microphone bound.
+        let audioSeconds = Double(totalSamples) / 16_000
+        return isFile ? max(180 * 10, audioSeconds * 3) : 180 * 10
+    }
 
-    func start(locale: String, status: (String) -> Void) async throws {
+    func start(source: AudioSource, locale: String, status: (String) -> Void) async throws {
+        guard let output = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000,
+                                         channels: 1, interleaved: false) else {
+            throw DiktatError(message: "Kunne ikke opprette lydformat.")
+        }
+        switch source {
+        case .microphone:
+            try await startMicrophone(output: output, locale: locale, status: status)
+        case .file(let url):
+            try await startFile(url, output: output, locale: locale, status: status)
+        }
+    }
+
+    private func startMicrophone(output: AVAudioFormat, locale: String, status: (String) -> Void) async throws {
         guard await AVCaptureDevice.requestAccess(for: .audio) else {
             throw DiktatError(message: "Mikrofontilgang mangler. Gi Dikta tilgang i Systeminnstillinger.")
         }
         try checkCancellation()
         status("Klargjør mikrofon …")
         let input = engine.inputNode.outputFormat(forBus: 0)
-        guard input.sampleRate > 0, input.channelCount > 0,
-              let output = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000,
-                                         channels: 1, interleaved: false) else {
+        guard input.sampleRate > 0, input.channelCount > 0 else {
             throw DiktatError(message: "Ingen tilgjengelig mikrofon.")
         }
-        let (stream, continuation) = AsyncThrowingStream<WhisperChunk, Error>.makeStream(bufferingPolicy: .bufferingOldest(8))
-        let chunks = WhisperChunks(continuation)
-        self.chunks = chunks
+        let chunks = makeChunks(bufferingPolicy: .bufferingOldest(8), locale: locale)
         let feed = try AudioFeed(input: input, output: output, level: { [weak self] level in
             Task { @MainActor [weak self] in
                 guard let self, !self.cancelled else { return }
@@ -147,6 +165,45 @@ final class WhisperSession: DictationSession {
             }
         })
         self.feed = feed
+        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: input, block: feed.makeTap())
+        tapInstalled = true
+        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
+                                                          object: engine, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.followInputChange()
+            }
+        }
+        engine.prepare()
+        try engine.start()
+        startedAt = Date()
+    }
+
+    // The whole file is decoded up front, so the queue is unbounded and the
+    // block count is known before processing starts.
+    private func startFile(_ url: URL, output: AVAudioFormat, locale: String, status: (String) -> Void) async throws {
+        isFile = true
+        status("Leser lydfil …")
+        let chunks = makeChunks(bufferingPolicy: .unbounded, locale: locale)
+        do {
+            try await AudioFileDecoder.decode(url, to: output) { buffer in try chunks.append(buffer) }
+        } catch {
+            chunks.finish(error)
+            throw error
+        }
+        try checkCancellation()
+        chunks.finish(nil)
+        guard chunks.submittedSamples > 0 else {
+            throw DiktatError(message: "Lydfilen inneholder ingen lyd.")
+        }
+        totalBlocks = chunks.submittedBlocks
+        totalSamples = chunks.submittedSamples
+    }
+
+    private func makeChunks(bufferingPolicy: AsyncThrowingStream<WhisperChunk, Error>.Continuation.BufferingPolicy,
+                            locale: String) -> WhisperChunks {
+        let (stream, continuation) = AsyncThrowingStream<WhisperChunk, Error>.makeStream(bufferingPolicy: bufferingPolicy)
+        let chunks = WhisperChunks(continuation)
+        self.chunks = chunks
         worker = Task { [weak self] in
             guard let self else { return }
             do {
@@ -171,17 +228,7 @@ final class WhisperSession: DictationSession {
                 throw error
             }
         }
-        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: input, block: feed.makeTap())
-        tapInstalled = true
-        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
-                                                          object: engine, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.followInputChange()
-            }
-        }
-        engine.prepare()
-        try engine.start()
-        startedAt = Date()
+        return chunks
     }
 
     // The engine stops when the input device changes (e.g. a headset connects).
@@ -201,9 +248,10 @@ final class WhisperSession: DictationSession {
     }
 
     private func statusText(processing: Bool) -> String {
+        if isFile { return "Transkriberer fil · \(blocksFinished) av \(totalBlocks) bolker" }
         if finishing { return "Whisper ferdigstiller · \(blocksFinished) bolker ferdige" }
         let duration = startedAt.map { Date().timeIntervalSince($0) } ?? 0
-        let remaining = max(0, Int(duration / 20) - blocksFinished)
+        let remaining = max(0, Int(duration / 30) - blocksFinished)
         if processing { return "Lytter · Whisper behandler · \(remaining) bolker igjen" }
         return "Lytter · \(blocksFinished) bolker ferdige"
     }

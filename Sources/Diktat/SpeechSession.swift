@@ -8,7 +8,7 @@ protocol DictationSession: AnyObject {
     var onLevel: ((Float) -> Void)? { get set }
     var processingProgress: Double { get }
     var finalizationTimeout: Double { get }
-    func start(locale: String, status: (String) -> Void) async throws
+    func start(source: AudioSource, locale: String, status: (String) -> Void) async throws
     func finish() async throws -> String
     func cancel() async
 }
@@ -38,8 +38,8 @@ final class SpeechSession {
     }
     var processingProgress: Double { backend.processingProgress }
     var finalizationTimeout: Double { backend.finalizationTimeout }
-    func start(locale: String, status: (String) -> Void) async throws {
-        try await backend.start(locale: locale, status: status)
+    func start(source: AudioSource, locale: String, status: (String) -> Void) async throws {
+        try await backend.start(source: source, locale: locale, status: status)
     }
     func finish() async throws -> String { try await backend.finish() }
     func cancel() async { await backend.cancel() }

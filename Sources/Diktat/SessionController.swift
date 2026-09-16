@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import UniformTypeIdentifiers
 import KeyboardShortcuts
 
 extension KeyboardShortcuts.Name {
@@ -67,15 +68,31 @@ final class SessionController: ObservableObject {
 
     func toggle() {
         if phase == .recording { stop() }
-        else if !isBusy { start() }
+        else if !isBusy { start(source: .microphone) }
     }
 
-    private func start() {
+    // Lets a recording made elsewhere (e.g. a phone voice memo) be transcribed.
+    // The result is copied only; the frontmost app after the open panel is not a paste target.
+    func transcribeFile() {
+        guard !isBusy else { return }
+        let dialog = NSOpenPanel()
+        dialog.title = "Velg lydfil"
+        dialog.prompt = "Transkriber"
+        dialog.message = "Velg et lydopptak som skal transkriberes lokalt."
+        dialog.allowedContentTypes = [.audio, .mpeg4Audio, .mp3, .wav, .aiff, .mpeg4Movie, .quickTimeMovie]
+        dialog.allowsMultipleSelection = false
+        dialog.canChooseDirectories = false
+        NSApp.activate()
+        guard dialog.runModal() == .OK, let url = dialog.url else { return }
+        start(source: .file(url))
+    }
+
+    private func start(source: AudioSource) {
         text = ""
         audioLevel = 0
         progress = 0
         phase = .preparing
-        message = "Klargjør diktasjon …"
+        message = source.isFile ? "Klargjør transkripsjon …" : "Klargjør diktasjon …"
         panel.show()
         let session = SpeechSession(useNBWhisper: useNBWhisper)
         self.session = session
@@ -99,15 +116,20 @@ final class SessionController: ObservableObject {
         operation = Task { [weak self] in
             guard let self else { return }
             do {
-                try await session.start(locale: selectedLocale) { [weak self] status in
+                try await session.start(source: source, locale: selectedLocale) { [weak self] status in
                     guard let self, self.session === session, self.phase == .preparing else { return }
                     self.message = status
                 }
                 guard self.session === session, self.phase == .preparing else { return }
+                if source.isFile {
+                    self.phase = .recording
+                    self.stop(automaticallyPaste: false)
+                    return
+                }
                 self.phase = .recording
                 let language = selectedLocale == "nb-NO" ? "Norsk bokmål" : "English"
                 self.message = "Lytter · \(language)"
-                if self.useNBWhisper { self.message += " · Whisper · 20 s" }
+                if self.useNBWhisper { self.message += " · Whisper · 30 s" }
             } catch {
                 guard self.session === session, self.phase == .preparing else { return }
                 self.fail(error)
@@ -115,7 +137,7 @@ final class SessionController: ObservableObject {
         }
     }
 
-    private func stop() {
+    private func stop(automaticallyPaste shouldPaste: Bool? = nil) {
         guard let session else { return }
         phase = .finishing
         progress = 0
@@ -134,7 +156,7 @@ final class SessionController: ObservableObject {
         }
         message = "Ferdigstiller …"
         delivery.captureTarget()
-        let shouldPaste = automaticallyPaste
+        let shouldPaste = shouldPaste ?? automaticallyPaste
         let timeoutSeconds = session.finalizationTimeout
         timeout = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(timeoutSeconds)) } catch { return }

@@ -15,6 +15,7 @@ struct DiktatApp: App {
             Button(controller.phase == .recording ? "Stopp diktasjon" : "Start diktasjon") { controller.toggle() }
                 .disabled(!controller.canToggle)
             Button("Avbryt diktasjon") { controller.cancel() }.disabled(!controller.canCancel)
+            Button("Transkriber lydfil …") { controller.transcribeFile() }.disabled(controller.isBusy)
             Divider()
             Picker("Språk", selection: $controller.locale) {
                 Text("Norsk bokmål").tag("nb-NO")
@@ -115,7 +116,7 @@ private struct SettingsView: View {
                     Text("NB-Whisper").tag(true)
                     Text("Mac-diktasjon").tag(false)
                 }
-                Text("Whisper behandler 20 sekunder om gangen mens du snakker. Ved stopp ferdigstilles bare køen og den siste resten.")
+                Text("Whisper behandler 30 sekunder om gangen mens du snakker. Ved stopp ferdigstilles bare køen og den siste resten.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Lim inn automatisk", isOn: $controller.automaticallyPaste)
                 Text("Når valget er av, kopieres teksten bare. Teksten beholdes på utklippstavlen i begge modi.")

@@ -15,7 +15,7 @@ Large bruker fullpresisjonsfilen på 3 095 033 483 byte fra
 revisjon `8c6249fdeeb4dcd05e5735a4c39640607eb6e4ac`, SHA-256
 `0f2f66f22e11a7c7da3c582d8e5c89cb2c0011753ba9c7c9731e320a4ba33e76`.
 
-Whisper behandler 20 sekunder ny lyd om gangen mens du snakker. Etter første
+Whisper behandler 30 sekunder ny lyd om gangen mens du snakker. Etter første
 bolk tas fire sekunder fra forrige bolk med som overlapp. Modellen forhåndslastes ved appstart og beholdes i minnet mellom økter.
 Mikrofonen venter ikke på modellasting; lyden settes i kø hvis modellen ennå
 ikke er klar. Bolkene behandles etter tur. Panelet viser bare mikrofonens lydnivå;
@@ -60,6 +60,16 @@ Kilder og lisenser: [NB-Whisper Medium (Apache 2.0)](https://huggingface.co/NbAi
 [whisper.cpp (MIT)](https://github.com/ggml-org/whisper.cpp/tree/v1.9.4),
 [Silero VAD](https://huggingface.co/ggml-org/whisper-vad).
 
+## Transkripsjon av lydfil
+
+«Transkriber lydfil …» i menyen åpner en filvelger og bruker samme motor og språk
+som diktasjon. Filen dekodes med AVAudioFile utenfor hovedtråden og sendes gjennom
+samme AudioFeed-konvertering som mikrofonen, slik at begge motorene ser identisk
+format. Hele filen dekodes før behandling; køen er ubegrenset, og panelet viser
+antall ferdige bolker av totalen for Whisper. Tidsgrensen skaleres med lydlengden.
+Resultatet kopieres bare, aldri limes inn automatisk, siden filvelgeren gjør
+forgrunnsappen uforutsigbar. Filen leses kun; ingenting skrives eller lagres.
+
 ## Bygg og installer
 
 ```sh
@@ -81,6 +91,7 @@ KeyboardShortcuts 3.1.0 ligger i `Vendor/` med MIT-lisens og dokumenterte tilpas
 - `SpeechSession.swift`: felles øktgrensesnitt og valg av talemotor.
 - `AppleSpeechSession.swift`: Apples lokale talegjenkjenning og språkmodeller.
 - `AudioFeed.swift`: mikrofonkonvertering og serialiserte lydcallbacker.
+- `AudioSource.swift`: mikrofon eller lydfil som kilde, og dekoding av filer.
 - `WhisperSession.swift`: lyd i bolker, kø og skjøting av tekst.
 - `NBWhisper.swift` og `Sources/CWhisper/`: lokal modell, native kjøring og avbryt.
 - `TranscriptBuffer.swift`: endelige og foreløpige Apple-segmenter.
