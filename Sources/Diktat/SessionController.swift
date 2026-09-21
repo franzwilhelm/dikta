@@ -91,6 +91,7 @@ final class SessionController: ObservableObject {
         text = ""
         audioLevel = 0
         progress = 0
+        showProgress = false
         phase = .preparing
         message = source.isFile ? "Klargjør transkripsjon …" : "Klargjør diktasjon …"
         panel.show()
@@ -123,7 +124,7 @@ final class SessionController: ObservableObject {
                 guard self.session === session, self.phase == .preparing else { return }
                 if source.isFile {
                     self.phase = .recording
-                    self.stop(automaticallyPaste: false)
+                    self.stop(automaticallyPaste: false, showFileProgress: true)
                     return
                 }
                 self.phase = .recording
@@ -137,21 +138,23 @@ final class SessionController: ObservableObject {
         }
     }
 
-    private func stop(automaticallyPaste shouldPaste: Bool? = nil) {
+    private func stop(automaticallyPaste shouldPaste: Bool? = nil, showFileProgress: Bool = false) {
         guard let session else { return }
         phase = .finishing
         progress = 0
         showProgress = false
-        let clock = ContinuousClock()
-        let began = clock.now
-        progressTask = Task { [weak self] in
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
-                guard let self, self.phase == .finishing else { return }
-                if clock.now - began >= .seconds(2) { self.showProgress = true }
-                // Poll actual completed audio; never advance just because time passed.
-                let actual = Int(session.processingProgress * 100)
-                self.progress = min(99, max(self.progress, actual))
+        if showFileProgress {
+            let clock = ContinuousClock()
+            let began = clock.now
+            progressTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
+                    guard let self, self.phase == .finishing else { return }
+                    if clock.now - began >= .seconds(2) { self.showProgress = true }
+                    // Poll actual completed audio; never advance just because time passed.
+                    let actual = Int(session.processingProgress * 100)
+                    self.progress = min(99, max(self.progress, actual))
+                }
             }
         }
         message = "Ferdigstiller …"

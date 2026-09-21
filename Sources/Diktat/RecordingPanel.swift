@@ -89,8 +89,8 @@ private struct RecordingView: View {
                     }
                     Button("Lukk") { controller.panel.hide() }
                 }
-            } else if controller.phase == .finishing || controller.phase == .delivering {
-                if controller.showProgress {
+            } else if [.preparing, .finishing, .delivering, .cancelling].contains(controller.phase) {
+                if controller.showProgress && [.finishing, .delivering].contains(controller.phase) {
                     Text("\(controller.progress) %")
                         .font(.system(size: 28, weight: .medium, design: .rounded))
                         .monospacedDigit()
@@ -157,6 +157,6 @@ private struct ProcessingDots: View {
                 }
             }
         }
-        .accessibilityLabel("Ferdigstiller diktasjon")
+        .accessibilityLabel("Behandler …")
     }
 }

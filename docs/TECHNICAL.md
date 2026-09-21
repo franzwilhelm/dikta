@@ -39,14 +39,13 @@ Norsk bruker språkkoden `no`, engelsk bruker `en`, med fire CPU-tråder og beam
 Første oppstart kan også bruke tid på å kompilere Metal-kjerner, samtidig som
 mikrofonen allerede kan ta opp. Modellen bruker minne også mellom opptak.
 
-Ved stopp viser panelet tre pulserende prikker de første to sekundene. Deretter
-vises prosent behandlet lyd, inkludert bolker som ble ferdige
-under opptaket. Ferdige bolker vektes etter lydlengde; den aktive bolken bruker
-Whispers egen fremdriftsrapportering. Verdien leses hvert 50 ms og tallendringer
-animeres. Tiden alene flytter ikke prosenten. Whisper rapporterer grovt, så tallet
-kan stå stille og deretter hoppe. Dette er ikke prosent av forventet ventetid.
+Ved klargjøring og ferdigstilling av mikrofondiktasjon viser panelet tre
+pulserende prikker uten prosent. Ved filtranskripsjon byttes prikkene ut med
+prosent behandlet lyd etter to sekunder. Ferdige bolker vektes etter lydlengde;
+den aktive bolken bruker Whispers egen fremdriftsrapportering. Verdien leses
+hvert 50 ms og tallendringer animeres. Tiden alene flytter ikke prosenten.
 100 % settes først når hele resultatet er klart. Mac-diktasjon gir ingen slik
-fremdriftsrapportering og står på 0 % til ferdigstilling er fullført.
+fremdriftsrapportering og står på 0 % til filtranskripsjonen er fullført.
 Tekstforhåndsvisning og løpende status er fjernet fra opptakspanelet for begge
 motorene. Feil vises fortsatt med mulighet for kopiering.
 
@@ -66,7 +65,7 @@ Kilder og lisenser: [NB-Whisper Medium (Apache 2.0)](https://huggingface.co/NbAi
 som diktasjon. Filen dekodes med AVAudioFile utenfor hovedtråden og sendes gjennom
 samme AudioFeed-konvertering som mikrofonen, slik at begge motorene ser identisk
 format. Hele filen dekodes før behandling; køen er ubegrenset, og panelet viser
-antall ferdige bolker av totalen for Whisper. Tidsgrensen skaleres med lydlengden.
+prosent behandlet lyd for Whisper. Tidsgrensen skaleres med lydlengden.
 Resultatet kopieres bare, aldri limes inn automatisk, siden filvelgeren gjør
 forgrunnsappen uforutsigbar. Filen leses kun; ingenting skrives eller lagres.
 
