@@ -1,7 +1,7 @@
-Dikta kan nå transkribere lydfiler, ikke bare direkte diktasjon.
+Diktasjon viser nå en enkel lasteindikator mens appen jobber.
 
-- Nytt menyvalg «Transkriber lydfil …»: velg et opptak (m4a, mp3, wav, aiff, caf eller lyd fra mp4/mov), for eksempel et taleopptak fra mobilen, og teksten kopieres til utklippstavlen.
-- Filer bruker samme talemotor og språk som diktasjon, og panelet viser fremdrift. Escape avbryter.
-- Whisper behandler nå 30 sekunder om gangen i stedet for 20.
+- Pulserende prikker erstatter prosentvisning ved ferdigstilling av mikrofondiktasjon.
+- Prosentvisning beholdes ved transkribering av lydfiler.
+- Lasteindikatoren vises også under klargjøring.
 
-Nedlastede modeller og innstillinger beholdes. Appen oppdaterer seg selv fra 0.7.0.
+Nedlastede modeller og innstillinger beholdes.
