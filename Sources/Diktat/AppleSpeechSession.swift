@@ -130,6 +130,8 @@ final class AppleSpeechSession: DictationSession {
     }
 
     func finish() async throws -> String {
+        // People press stop as the last word leaves their mouth; keep listening a moment.
+        if fileSeconds == 0 { try? await Task.sleep(for: .milliseconds(500)) }
         stopAudio()
         try await analyzer?.finalizeAndFinishThroughEndOfInput()
         try await resultsTask?.value

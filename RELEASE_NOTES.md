@@ -1,11 +1,6 @@
-Dikta er raskere, mer stabil og viser tydelig hvilken mikrofon som brukes.
+Dikta får nå med seg de siste ordene før du stopper.
 
-- Transkribering holder seg rask selv om appen har stått åpen lenge.
-- Appen henger seg ikke lenger opp eller krasjer når mikrofonen byttes, for eksempel når AirPods kobles til.
-- Mac-mikrofonen brukes som standard, slik at de første ordene ikke forsvinner. Mikrofonen kan velges i Innstillinger.
-- Opptaksvinduet viser hvilken mikrofon som brukes når den er ny, eller når det er AirPods.
-- Ny stoppknapp til høyre og avbryt-knapp til venstre.
-- Opptak lengre enn 10 sekunder må bekreftes før de forkastes.
-- Menyen viser når Dikta gjør seg klar etter oppstart.
+- Opptaket fortsetter et halvt sekund etter at du trykker stopp.
+- Whisper fullfører den siste setningen i stedet for å kutte den.
 
 Nedlastede modeller og innstillinger beholdes.

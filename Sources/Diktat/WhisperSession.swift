@@ -37,6 +37,13 @@ final class WhisperChunks: @unchecked Sendable {
 
     private func yield(_ chunk: WhisperChunk) throws {
         if chunk.isFinal, chunk.start > 0, chunk.samples.count == overlap { return }
+        var chunk = chunk
+        if chunk.isFinal {
+            // Whisper tends to drop words that run right up to the end of the
+            // audio. A second of trailing silence lets it finish the sentence.
+            chunk = WhisperChunk(samples: chunk.samples + [Float](repeating: 0, count: 16_000),
+                                 start: chunk.start, isFinal: true)
+        }
         submittedSamples += chunk.samples.count
         submittedBlocks += 1
         if case .dropped = continuation.yield(chunk) {
@@ -204,7 +211,6 @@ final class WhisperSession: DictationSession {
                 try self.checkCancellation()
                 for try await chunk in stream {
                     try self.checkCancellation()
-                    if chunk.isFinal, chunk.start > 0, chunk.samples.count == 4 * 16_000 { continue }
                     self.onStatus?(self.statusText(processing: true))
                     self.currentSamples = chunk.samples.count
                     let words = try await self.whisper.transcribe(chunk.samples, locale: locale)
@@ -246,6 +252,8 @@ final class WhisperSession: DictationSession {
 
     func finish() async throws -> String {
         finishing = true
+        // People press stop as the last word leaves their mouth; keep listening a moment.
+        if !isFile { try? await Task.sleep(for: .milliseconds(500)) }
         stopAudio()
         totalSamples = chunks?.submittedSamples ?? 0
         onStatus?(statusText(processing: true))
