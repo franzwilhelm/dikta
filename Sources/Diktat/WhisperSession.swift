@@ -94,13 +94,15 @@ final class WhisperSession: DictationSession {
     var onText: ((String) -> Void)?
     var onFailure: ((Error) -> Void)?
     var onStatus: ((String) -> Void)?
-    private let engine = AVAudioEngine()
+    private let microphone = Microphone()
+    var onInput: ((InputDevice?, Bool) -> Void)? {
+        get { microphone.onInput }
+        set { microphone.onInput = newValue }
+    }
     private let whisper = NBWhisper.shared
     private let model = WhisperModels.shared.availableModel
     private var feed: AudioFeed?
     private var worker: Task<Void, Error>?
-    private var observer: NSObjectProtocol?
-    private var tapInstalled = false
     private var cancelled = false
     private var finishing = false
     private var transcript = WhisperTranscript()
@@ -143,10 +145,7 @@ final class WhisperSession: DictationSession {
         }
         try checkCancellation()
         status("Klargjør mikrofon …")
-        let input = engine.inputNode.outputFormat(forBus: 0)
-        guard input.sampleRate > 0, input.channelCount > 0 else {
-            throw DiktatError(message: "Ingen tilgjengelig mikrofon.")
-        }
+        let input = try await microphone.open()
         let chunks = makeChunks(bufferingPolicy: .bufferingOldest(8), locale: locale)
         let feed = try AudioFeed(input: input, output: output, level: { [weak self] level in
             Task { @MainActor [weak self] in
@@ -165,16 +164,10 @@ final class WhisperSession: DictationSession {
             }
         })
         self.feed = feed
-        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: input, block: feed.makeTap())
-        tapInstalled = true
-        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
-                                                          object: engine, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.followInputChange()
-            }
+        try await microphone.start(tap: feed.makeTap()) { [weak self] error in
+            guard let self, !self.cancelled, !self.finishing else { return }
+            self.onFailure?(error)
         }
-        engine.prepare()
-        try engine.start()
         startedAt = Date()
     }
 
@@ -231,22 +224,6 @@ final class WhisperSession: DictationSession {
         return chunks
     }
 
-    // The engine stops when the input device changes (e.g. a headset connects).
-    // Re-tap the new device and keep recording instead of failing the session.
-    private func followInputChange() {
-        guard !cancelled, !finishing, tapInstalled, let feed else { return }
-        engine.inputNode.removeTap(onBus: 0)
-        let input = engine.inputNode.outputFormat(forBus: 0)
-        guard input.sampleRate > 0, input.channelCount > 0 else {
-            tapInstalled = false
-            onFailure?(DiktatError(message: "Mikrofonen ble koblet fra. Ferdig tekst er bevart."))
-            return
-        }
-        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: input, block: feed.makeTap())
-        do { try engine.start() }
-        catch { onFailure?(DiktatError(message: "Mikrofonen ble endret og kunne ikke startes igjen. Ferdig tekst er bevart.")) }
-    }
-
     private func statusText(processing: Bool) -> String {
         if isFile { return "Transkriberer fil · \(blocksFinished) av \(totalBlocks) bolker" }
         if finishing { return "Whisper ferdigstiller · \(blocksFinished) bolker ferdige" }
@@ -262,9 +239,7 @@ final class WhisperSession: DictationSession {
     }
 
     private func stopAudio() {
-        if let observer { NotificationCenter.default.removeObserver(observer); self.observer = nil }
-        engine.stop()
-        if tapInstalled { engine.inputNode.removeTap(onBus: 0); tapInstalled = false }
+        microphone.stop()
         feed?.finish()
         feed = nil
     }
@@ -287,5 +262,6 @@ final class WhisperSession: DictationSession {
         await whisper.cancel()
         _ = await worker?.result
         worker = nil
+        whisper.release()
     }
 }

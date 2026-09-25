@@ -11,10 +11,28 @@ extension KeyboardShortcuts.Name {
 @MainActor
 final class SessionController: ObservableObject {
     enum Phase { case idle, preparing, recording, finishing, delivering, cancelling, failed }
-    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var phase: Phase = .idle {
+        didSet {
+            if phase == .recording, oldValue != .recording { recordingStartedAt = Date() }
+            if phase != .recording, confirmingDiscard {
+                confirmingDiscard = false
+                panel.refresh()
+            }
+        }
+    }
     @Published private(set) var audioLevel: Float = 0
     @Published private(set) var progress = 0
     @Published private(set) var showProgress = false
+    // Discarding more than a few seconds of speech by accident is costly; ask first.
+    @Published private(set) var confirmingDiscard = false
+    private var recordingStartedAt: Date?
+    // The microphone in use. Its icon shows briefly, and until real
+    // sound arrives, before the panel switches to the sound bars.
+    @Published private(set) var inputDevice: InputDevice?
+    @Published private(set) var showBars = false
+    private var hearing = false
+    private var badgeUntil = Date.distantPast
+    private var barsTask: Task<Void, Never>?
     private var progressTask: Task<Void, Never>?
     @Published private(set) var text = ""
     @Published private(set) var lastText = ""
@@ -47,7 +65,7 @@ final class SessionController: ObservableObject {
     @Published var useNBWhisper = UserDefaults.standard.object(forKey: "useNBWhisper") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(useNBWhisper, forKey: "useNBWhisper")
-            if useNBWhisper && !isBusy { Task { try? await NBWhisper.shared.prepare() } }
+            if useNBWhisper && !isBusy { Task { await NBWhisper.shared.warmUp() } }
         }
     }
     private var session: SpeechSession?
@@ -56,14 +74,20 @@ final class SessionController: ObservableObject {
     private let delivery = TextDelivery()
     lazy var panel = RecordingPanel(controller: self)
 
+    // Recording from the microphone, including the moment it starts up.
+    var isListening: Bool { !preparingFile && [.preparing, .recording].contains(phase) }
+    private var preparingFile = false
+    // X and stop appear together with the sound bars, not over the microphone icon.
+    var buttonsVisible: Bool { !isListening || showBars }
+
     var isBusy: Bool { ![.idle, .failed].contains(phase) }
     var canCancel: Bool { [.preparing, .recording, .finishing].contains(phase) }
     var canToggle: Bool { [.idle, .failed, .recording].contains(phase) }
 
     init() {
-        if useNBWhisper { Task { try? await NBWhisper.shared.prepare() } }
+        if useNBWhisper { Task { await NBWhisper.shared.warmUp() } }
         KeyboardShortcuts.onKeyUp(for: .toggleDictation) { [weak self] in self?.toggle() }
-        KeyboardShortcuts.onKeyUp(for: .cancelDictation) { [weak self] in self?.cancel() }
+        KeyboardShortcuts.onKeyUp(for: .cancelDictation) { [weak self] in self?.dismissPanel() }
     }
 
     func toggle() {
@@ -92,6 +116,7 @@ final class SessionController: ObservableObject {
         audioLevel = 0
         progress = 0
         showProgress = false
+        preparingFile = source.isFile
         phase = .preparing
         message = source.isFile ? "Klargjør transkripsjon …" : "Klargjør diktasjon …"
         panel.show()
@@ -100,6 +125,30 @@ final class SessionController: ObservableObject {
         session.onLevel = { [weak self, weak session] level in
             guard let self, self.session === session, self.phase == .recording else { return }
             self.audioLevel = level
+        }
+        inputDevice = nil
+        // The same quick microphone as last time needs no introduction: go straight to the bars.
+        if AudioDevices.lastQuickUID != nil {
+            barsTask?.cancel()
+            hearing = true
+            showBars = true
+        } else {
+            showBadge()
+        }
+        session.onInput = { [weak self, weak session] device, hearing in
+            guard let self, self.session === session else { return }
+            self.inputDevice = device
+            let familiar = device.map { !$0.isBluetooth && $0.uid == AudioDevices.lastQuickUID } ?? false
+            if let device {
+                AudioDevices.lastSymbol = device.symbol
+                AudioDevices.lastQuickUID = device.isBluetooth ? nil : device.uid
+            }
+            if hearing {
+                self.hearing = true
+                self.updateBars()
+            } else if !(familiar && self.showBars) {
+                self.showBadge()
+            }
         }
         session.onText = { [weak self, weak session] text in
             guard let self, self.session === session else { return }
@@ -136,6 +185,22 @@ final class SessionController: ObservableObject {
                 self.fail(error)
             }
         }
+    }
+
+    private func showBadge() {
+        hearing = false
+        showBars = false
+        badgeUntil = Date().addingTimeInterval(0.8)
+        barsTask?.cancel()
+        barsTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(800)) } catch { return }
+            self?.updateBars()
+        }
+    }
+
+    private func updateBars() {
+        guard hearing, Date() >= badgeUntil else { return }
+        showBars = true
     }
 
     private func stop(automaticallyPaste shouldPaste: Bool? = nil, showFileProgress: Bool = false) {
@@ -197,8 +262,19 @@ final class SessionController: ObservableObject {
     }
 
     func dismissPanel() {
+        if confirmingDiscard { cancel(); return }
+        if phase == .recording, let recordingStartedAt, Date().timeIntervalSince(recordingStartedAt) > 10 {
+            confirmingDiscard = true
+            panel.refresh()
+            return
+        }
         if canCancel { cancel() }
         panel.hide()
+    }
+
+    func keepRecording() {
+        confirmingDiscard = false
+        panel.refresh()
     }
 
     func cancel() {

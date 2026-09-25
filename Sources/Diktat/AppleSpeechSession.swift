@@ -4,12 +4,14 @@ import Foundation
 
 @MainActor
 final class AppleSpeechSession: DictationSession {
-    private let engine = AVAudioEngine()
+    private let microphone = Microphone()
+    var onInput: ((InputDevice?, Bool) -> Void)? {
+        get { microphone.onInput }
+        set { microphone.onInput = newValue }
+    }
     private var analyzer: SpeechAnalyzer?
     private var feed: AudioFeed?
     private var resultsTask: Task<Void, Error>?
-    private var configurationObserver: NSObjectProtocol?
-    private var tapInstalled = false
     private var cancelled = false
     private var buffer = TranscriptBuffer()
     var onLevel: ((Float) -> Void)?
@@ -64,10 +66,7 @@ final class AppleSpeechSession: DictationSession {
     private func startMicrophone(analyzer: SpeechAnalyzer, transcriber: DictationTranscriber,
                                  status: (String) -> Void) async throws {
         status("Klargjør mikrofon …")
-        let input = engine.inputNode.outputFormat(forBus: 0)
-        guard input.sampleRate > 0, input.channelCount > 0 else {
-            throw DiktatError(message: "Ingen tilgjengelig mikrofon.")
-        }
+        let input = try await microphone.open()
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber], considering: input) else {
             throw DiktatError(message: "Fant ikke et støttet lydformat.")
         }
@@ -89,17 +88,10 @@ final class AppleSpeechSession: DictationSession {
         self.feed = feed
         try await analyzer.start(inputSequence: stream)
         try checkCancellation()
-        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: input, block: feed.makeTap())
-        tapInstalled = true
-        configurationObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.followInputChange()
-            }
+        try await microphone.start(tap: feed.makeTap()) { [weak self] error in
+            guard let self, !self.cancelled else { return }
+            self.onFailure?(error)
         }
-        engine.prepare()
-        try engine.start()
     }
 
     // The whole file is decoded into the analyzer's format and queued before finish().
@@ -126,37 +118,13 @@ final class AppleSpeechSession: DictationSession {
         continuation.finish()
     }
 
-    // The engine stops when the input device changes (e.g. a headset connects).
-    // Re-tap the new device and keep recording instead of failing the session.
-    private func followInputChange() {
-        guard !cancelled, tapInstalled, let feed else { return }
-        engine.inputNode.removeTap(onBus: 0)
-        let input = engine.inputNode.outputFormat(forBus: 0)
-        guard input.sampleRate > 0, input.channelCount > 0 else {
-            tapInstalled = false
-            onFailure?(DiktatError(message: "Mikrofonen ble koblet fra. Tilgjengelig tekst er bevart."))
-            return
-        }
-        engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: input, block: feed.makeTap())
-        do { try engine.start() }
-        catch { onFailure?(DiktatError(message: "Mikrofonen ble endret og kunne ikke startes igjen. Tilgjengelig tekst er bevart.")) }
-    }
-
     private func checkCancellation() throws {
         try Task.checkCancellation()
         if cancelled { throw CancellationError() }
     }
 
     private func stopAudio() {
-        if let configurationObserver {
-            NotificationCenter.default.removeObserver(configurationObserver)
-            self.configurationObserver = nil
-        }
-        engine.stop()
-        if tapInstalled {
-            engine.inputNode.removeTap(onBus: 0)
-            tapInstalled = false
-        }
+        microphone.stop()
         feed?.finish()
         feed = nil
     }

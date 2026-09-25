@@ -6,6 +6,7 @@ protocol DictationSession: AnyObject {
     var onFailure: ((Error) -> Void)? { get set }
     var onStatus: ((String) -> Void)? { get set }
     var onLevel: ((Float) -> Void)? { get set }
+    var onInput: ((InputDevice?, Bool) -> Void)? { get set }
     var processingProgress: Double { get }
     var finalizationTimeout: Double { get }
     func start(source: AudioSource, locale: String, status: (String) -> Void) async throws
@@ -35,6 +36,10 @@ final class SpeechSession {
     var onLevel: ((Float) -> Void)? {
         get { backend.onLevel }
         set { backend.onLevel = newValue }
+    }
+    var onInput: ((InputDevice?, Bool) -> Void)? {
+        get { backend.onInput }
+        set { backend.onInput = newValue }
     }
     var processingProgress: Double { backend.processingProgress }
     var finalizationTimeout: Double { backend.finalizationTimeout }

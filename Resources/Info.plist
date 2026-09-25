@@ -1,21 +1,40 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-    <key>CFBundleExecutable</key><string>Dikta</string>
-    <key>CFBundleIdentifier</key><string>no.franzvonderlippe.Diktat</string>
-    <key>CFBundleName</key><string>Dikta</string>
-    <key>CFBundleDisplayName</key><string>Dikta</string>
-    <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.8.1</string>
-    <key>CFBundleVersion</key><string>10</string>
-    <key>LSMinimumSystemVersion</key><string>26.0</string>
-    <key>LSUIElement</key><true/>
-    <key>NSMicrophoneUsageDescription</key><string>Dikta bruker mikrofonen til lokal talegjenkjenning når du starter diktasjon.</string>
-    <key>NSPrincipalClass</key><string>NSApplication</string>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>SUFeedURL</key><string>https://github.com/franzwilhelm/dikta/releases/latest/download/appcast.xml</string>
-    <key>SUPublicEDKey</key><string>Y81jzdYz+Z4bJJKaxL4lTl6OSUkI57JIIydFwgxdHCQ=</string>
-    <key>SUEnableAutomaticChecks</key><true/>
-    <key>SUScheduledCheckInterval</key><integer>86400</integer>
-</dict></plist>
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Dikta</string>
+	<key>CFBundleExecutable</key>
+	<string>Dikta</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>no.franzvonderlippe.Diktat</string>
+	<key>CFBundleName</key>
+	<string>Dikta</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.8.2</string>
+	<key>CFBundleVersion</key>
+	<string>11</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Dikta bruker mikrofonen til lokal talegjenkjenning når du starter diktasjon.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/franzwilhelm/dikta/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>Y81jzdYz+Z4bJJKaxL4lTl6OSUkI57JIIydFwgxdHCQ=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+</dict>
+</plist>

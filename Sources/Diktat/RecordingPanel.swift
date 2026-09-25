@@ -33,14 +33,33 @@ final class RecordingPanel {
     func show() {
         hideTask?.cancel()
         monitorEscape()
-        let failed = controller?.phase == .failed
-        panel.setContentSize(NSSize(width: failed ? 360 : 160, height: failed ? 160 : 64))
+        panel.setContentSize(size)
         let pointer = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(pointer) } ?? NSScreen.main
         if let frame = screen?.visibleFrame {
             panel.setFrameOrigin(NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.minY + 48))
         }
         panel.orderFrontRegardless()
+    }
+
+    private var size: NSSize {
+        if controller?.phase == .failed { return NSSize(width: 360, height: 160) }
+        if controller?.confirmingDiscard == true { return NSSize(width: 360, height: 64) }
+        return NSSize(width: 200, height: 64)
+    }
+
+    // Resize in place, keeping the panel centred where the user left it.
+    func refresh() {
+        guard panel.isVisible else { return }
+        let frame = panel.frame
+        let target = size
+        let next = NSRect(x: frame.midX - target.width / 2, y: frame.minY, width: target.width, height: target.height)
+        // The hosted view fills the panel, so the capsule grows with the frame.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(next, display: true)
+        }
     }
 
     func hide() {
@@ -79,6 +98,7 @@ final class RecordingPanel {
 
 private struct RecordingView: View {
     @ObservedObject var controller: SessionController
+
     var body: some View {
         Group {
             if controller.phase == .failed {
@@ -89,6 +109,25 @@ private struct RecordingView: View {
                     }
                     Button("Lukk") { controller.panel.hide() }
                 }
+            } else if controller.confirmingDiscard {
+                HStack(spacing: 10) {
+                    Text("Forkaste opptaket?").font(.callout).lineLimit(1).fixedSize()
+                    ChoiceButton(title: "Fortsett", fill: .white.opacity(0.18)) { controller.keepRecording() }
+                    ChoiceButton(title: "Forkast", fill: .red.opacity(0.85)) { controller.cancel() }
+                }
+                .fixedSize()
+                .transition(.opacity)
+            } else if controller.isListening {
+                ZStack {
+                    if controller.showBars {
+                        LevelBars(level: controller.audioLevel)
+                            .transition(.opacity)
+                    } else {
+                        MicrophoneBadge(device: controller.inputDevice)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.25), value: controller.showBars)
             } else if [.preparing, .finishing, .delivering, .cancelling].contains(controller.phase) {
                 if controller.showProgress && [.finishing, .delivering].contains(controller.phase) {
                     Text("\(controller.progress) %")
@@ -101,35 +140,28 @@ private struct RecordingView: View {
                     ProcessingDots()
                 }
             } else {
-                HStack(spacing: 4) {
-                    ForEach(0..<7) { index in
-                        let distance = abs(index - 3)
-                        let envelope = 1 - Double(distance) * 0.26
-                        Capsule()
-                            .fill(.white)
-                            .frame(width: 4, height: 4 + 28 * envelope * Double(controller.audioLevel))
-                    }
-                }
-                .frame(height: 36)
-                .animation(.easeOut(duration: 0.09), value: controller.audioLevel)
-                .accessibilityLabel("Lydnivå fra mikrofonen")
+                LevelBars(level: controller.audioLevel)
             }
         }
         .padding(.vertical, 12)
-        .padding(.horizontal, 36)
-        .frame(width: controller.phase == .failed ? 360 : 160,
-               height: controller.phase == .failed ? 160 : 64)
-        .overlay(alignment: .trailing) {
-            Button { controller.dismissPanel() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
+        .padding(.horizontal, controller.confirmingDiscard ? 24 : 40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut(duration: 0.2), value: controller.confirmingDiscard)
+        .animation(.easeInOut(duration: 0.25), value: controller.buttonsVisible)
+        .overlay(alignment: .leading) {
+            if controller.phase != .failed && !controller.confirmingDiscard && controller.buttonsVisible {
+                PanelButton(symbol: "xmark",
+                            label: controller.canCancel ? "Avbryt diktasjon" : "Lukk") { controller.dismissPanel() }
+                    .help(controller.canCancel ? "Avbryt diktasjon (Esc)" : "Lukk (Esc)")
+                    .padding(.leading, 10)
             }
-            .buttonStyle(.plain)
-            .help(controller.canCancel ? "Avbryt diktasjon (Esc)" : "Lukk (Esc)")
-            .accessibilityLabel(controller.canCancel ? "Avbryt diktasjon" : "Lukk")
-            .padding(.trailing, 10)
+        }
+        .overlay(alignment: .trailing) {
+            if controller.phase == .recording && !controller.confirmingDiscard && controller.buttonsVisible {
+                PanelButton(symbol: "stop.fill", label: "Stopp og sett inn tekst") { controller.toggle() }
+                    .help("Stopp og sett inn tekst")
+                    .padding(.trailing, 10)
+            }
         }
         .foregroundStyle(.white)
         .background {
@@ -140,6 +172,81 @@ private struct RecordingView: View {
                     .overlay(Capsule().stroke(.white.opacity(0.4), lineWidth: 1))
             }
         }
+    }
+}
+
+private struct PanelButton: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(.white.opacity(hovering ? 0.2 : 0)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .accessibilityLabel(label)
+    }
+}
+
+private struct ChoiceButton: View {
+    let title: String
+    let fill: Color
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 12).padding(.vertical, 5)
+                .background(Capsule().fill(fill).brightness(hovering ? 0.12 : 0))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
+// Shown until the microphone delivers real sound, so it is clear which one is
+// used and when it is safe to speak.
+private struct MicrophoneBadge: View {
+    let device: InputDevice?
+    // Before the microphone reports itself, show the one used last time.
+    private var symbol: String { device?.symbol ?? AudioDevices.lastSymbol }
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 20, weight: .medium))
+            .frame(height: 36)
+            .accessibilityLabel("Starter \(device?.name ?? "mikrofonen") …")
+            .help(device?.name ?? "Mikrofon")
+    }
+}
+
+private struct LevelBars: View {
+    let level: Float
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<7) { index in
+                let distance = abs(index - 3)
+                let envelope = 1 - Double(distance) * 0.26
+                Capsule()
+                    .fill(.white)
+                    .frame(width: 4, height: 4 + 28 * envelope * Double(level))
+            }
+        }
+        .frame(height: 36)
+        .animation(.easeOut(duration: 0.09), value: level)
+        .accessibilityLabel("Lydnivå fra mikrofonen")
     }
 }
 

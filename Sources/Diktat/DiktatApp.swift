@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import CoreAudio
 import SwiftUI
 import KeyboardShortcuts
 import Sparkle
@@ -8,10 +9,13 @@ import Sparkle
 struct DiktatApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var controller = SessionController()
+    @ObservedObject private var whisper = NBWhisper.shared
+
+    private var warmingUp: Bool { controller.useNBWhisper && whisper.isLoading && !controller.isBusy }
 
     var body: some Scene {
         MenuBarExtra {
-            Text(controller.message)
+            Text(warmingUp ? "Gjør klar …" : controller.message)
             Button(controller.phase == .recording ? "Stopp diktasjon" : "Start diktasjon") { controller.toggle() }
                 .disabled(!controller.canToggle)
             Button("Avbryt diktasjon") { controller.cancel() }.disabled(!controller.canCancel)
@@ -38,7 +42,10 @@ struct DiktatApp: App {
             Button("Avslutt Dikta") { controller.quit() }
         } label: {
             Image(systemName: controller.phase == .recording ? "mic.fill" : "mic")
-                .accessibilityLabel("Dikta: \(controller.message)")
+                .opacity(warmingUp ? 0.45 : 1)
+                .symbolEffect(.pulse, isActive: warmingUp)
+                .animation(.easeInOut(duration: 0.6), value: warmingUp)
+                .accessibilityLabel(warmingUp ? "Dikta gjør klar" : "Dikta: \(controller.message)")
                 .onAppear {
                     if !UserDefaults.standard.bool(forKey: "hasOpenedSettings") {
                         UserDefaults.standard.set(true, forKey: "hasOpenedSettings")
@@ -105,6 +112,8 @@ private struct SettingsView: View {
     @ObservedObject var controller: SessionController
     @ObservedObject private var models = WhisperModels.shared
     @State private var permissionMessage = ""
+    @State private var microphones: [InputDevice] = []
+    @AppStorage(AudioDevices.preferenceKey) private var microphoneUID = AudioDevices.builtIn
     var body: some View {
         Form {
             Section("Diktasjon") {
@@ -117,6 +126,18 @@ private struct SettingsView: View {
                     Text("Mac-diktasjon").tag(false)
                 }
                 Text("Whisper behandler 30 sekunder om gangen mens du snakker. Ved stopp ferdigstilles bare køen og den siste resten.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Picker("Mikrofon", selection: $microphoneUID) {
+                    Text("Mac-mikrofonen").tag(AudioDevices.builtIn)
+                    Text("Systemvalg").tag("")
+                    ForEach(microphones.filter { $0.transport != kAudioDeviceTransportTypeBuiltIn }) { device in
+                        Label(device.name, systemImage: device.symbol).tag(device.uid)
+                    }
+                    if ![AudioDevices.builtIn, ""].contains(microphoneUID) && !microphones.contains(where: { $0.uid == microphoneUID }) {
+                        Text("Frakoblet mikrofon").tag(microphoneUID)
+                    }
+                }
+                Text("Mac-mikrofonen starter raskest. AirPods og andre Bluetooth-mikrofoner bruker et par sekunder på å starte, og kan miste de første ordene.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Lim inn automatisk", isOn: $controller.automaticallyPaste)
                 Text("Når valget er av, kopieres teksten bare. Teksten beholdes på utklippstavlen i begge modi.")
@@ -173,6 +194,7 @@ private struct SettingsView: View {
         .task {
             while !Task.isCancelled {
                 controller.refreshAccessibility()
+                microphones = AudioDevices.inputs
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
         }

@@ -37,8 +37,10 @@ private actor WhisperWorker {
     init(handle: WhisperHandle) { self.handle = handle }
 
     private var loadedModel: WhisperModel?
+    private(set) var lease = 0
 
     func prepare(_ model: WhisperModel) throws {
+        lease += 1
         if loadedModel == model { return }
         diktat_whisper_unload(handle.pointer)
         loadedModel = nil
@@ -69,19 +71,33 @@ private actor WhisperWorker {
         diktat_whisper_unload(handle.pointer)
         loadedModel = nil
     }
+
+    func unload(unlessPreparedAfter token: Int) -> Bool {
+        guard lease == token else { return false }
+        unload()
+        return true
+    }
 }
 
 @MainActor
-final class NBWhisper {
+final class NBWhisper: ObservableObject {
     static let shared = NBWhisper()
+    // True while the model is being read into memory; recording still works meanwhile.
+    @Published private(set) var isLoading = false
+    private var loaded: WhisperModel?
     var progress: Double { Double(diktat_whisper_progress(handle.pointer)) / 100 }
     private let handle = WhisperHandle()
     private lazy var worker = WhisperWorker(handle: handle)
+    private var unloadTask: Task<Void, Never>?
 
     func prepare(model: WhisperModel? = nil) async throws {
+        unloadTask?.cancel()
         let chosen = model ?? WhisperModels.shared.availableModel
         try NBWhisperAssets.validate(chosen)
+        if loaded != chosen { isLoading = true }
+        defer { isLoading = false }
         try await worker.prepare(chosen)
+        loaded = chosen
         try Task.checkCancellation()
     }
 
@@ -93,9 +109,27 @@ final class NBWhisper {
         return result
     }
 
+    // An idle resident model is paged out to swap over hours, and the next
+    // dictation then crawls while it is paged back in. Reloading from disk is
+    // quick and overlaps the first 30 seconds of recording.
+    func release() {
+        unloadTask?.cancel()
+        unloadTask = Task { [weak self, worker] in
+            let token = await worker.lease
+            do { try await Task.sleep(for: .seconds(20 * 60)) } catch { return }
+            if await worker.unload(unlessPreparedAfter: token) { self?.loaded = nil }
+        }
+    }
+
+    func warmUp() async {
+        try? await prepare()
+        release()
+    }
+
     func shutdown() async {
         handle.cancel()
         await worker.unload()
+        loaded = nil
     }
 
     func cancel() async {
