@@ -43,6 +43,12 @@ final class AppleSpeechSession: DictationSession {
         try checkCancellation()
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
+        let words = Vocabulary.words
+        if !words.isEmpty {
+            let context = AnalysisContext()
+            context.contextualStrings[.general] = words
+            try await analyzer.setContext(context)
+        }
         resultsTask = Task { [weak self] in
             do {
                 for try await result in transcriber.results {

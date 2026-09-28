@@ -29,7 +29,7 @@ int diktat_whisper_load(DiktatWhisper * handle, const char * model) {
     return handle->context ? 0 : -1;
 }
 int diktat_whisper_run(DiktatWhisper * handle, const float * samples, int count,
-                      const char * language, const char * vad) {
+                      const char * language, const char * vad, const char * prompt) {
     handle->words.clear();
     if (handle->cancelled.load()) return -2;
     if (!handle->context) return -1;
@@ -55,6 +55,10 @@ int diktat_whisper_run(DiktatWhisper * handle, const float * samples, int count,
     // Audio overlap provides context. Do not feed old prose as a prompt,
     // which can repeat previous sentences over silence.
     params.no_context = true;
+    // The user's word list biases spelling. Carrying it keeps it fixed for
+    // every 30-second window instead of sliding out behind decoded text.
+    params.initial_prompt = prompt;
+    params.carry_initial_prompt = prompt != nullptr;
     params.print_realtime = false;
     params.print_progress = false;
     params.print_timestamps = false;

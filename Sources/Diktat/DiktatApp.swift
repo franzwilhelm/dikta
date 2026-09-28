@@ -114,6 +114,7 @@ private struct SettingsView: View {
     @State private var permissionMessage = ""
     @State private var microphones: [InputDevice] = []
     @AppStorage(AudioDevices.preferenceKey) private var microphoneUID = AudioDevices.builtIn
+    @AppStorage(Vocabulary.key) private var vocabulary = Vocabulary.defaultText
     var body: some View {
         Form {
             Section("Diktasjon") {
@@ -142,6 +143,16 @@ private struct SettingsView: View {
                 Toggle("Lim inn automatisk", isOn: $controller.automaticallyPaste)
                 Text("Når valget er av, kopieres teksten bare. Teksten beholdes på utklippstavlen i begge modi.")
                     .font(.caption).foregroundStyle(.secondary)
+            }.disabled(controller.isBusy)
+            Section("Egne ord") {
+                TextEditor(text: $vocabulary)
+                    .font(.body)
+                    .frame(height: 120)
+                Text("Ord og uttrykk talemotoren skal kjenne igjen, for eksempel engelske faguttrykk. Skill med komma eller linjeskift. Skriv dem slik de skal staves.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if vocabulary != Vocabulary.defaultText {
+                    Button("Tilbakestill til standardlisten") { vocabulary = Vocabulary.defaultText }
+                }
             }.disabled(controller.isBusy)
             if controller.useNBWhisper {
                 Section("Whisper-modell") {

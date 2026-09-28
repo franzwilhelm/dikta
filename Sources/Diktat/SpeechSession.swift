@@ -23,7 +23,7 @@ final class SpeechSession {
     }
     var onText: ((String) -> Void)? {
         get { backend.onText }
-        set { backend.onText = newValue }
+        set { backend.onText = newValue.map { deliver in { deliver(Vocabulary.format($0)) } } }
     }
     var onFailure: ((Error) -> Void)? {
         get { backend.onFailure }
@@ -46,6 +46,6 @@ final class SpeechSession {
     func start(source: AudioSource, locale: String, status: (String) -> Void) async throws {
         try await backend.start(source: source, locale: locale, status: status)
     }
-    func finish() async throws -> String { try await backend.finish() }
+    func finish() async throws -> String { Vocabulary.format(try await backend.finish()) }
     func cancel() async { await backend.cancel() }
 }

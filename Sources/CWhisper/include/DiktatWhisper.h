@@ -6,7 +6,7 @@ extern "C" {
 typedef struct DiktatWhisper DiktatWhisper;
 DiktatWhisper * diktat_whisper_create(void);
 int diktat_whisper_load(DiktatWhisper *, const char * model);
-int diktat_whisper_run(DiktatWhisper *, const float *, int, const char * language, const char * vad);
+int diktat_whisper_run(DiktatWhisper *, const float *, int, const char * language, const char * vad, const char * prompt);
 int diktat_whisper_progress(DiktatWhisper *);
 void diktat_whisper_reset_progress(DiktatWhisper *);
 int diktat_whisper_word_count(DiktatWhisper *);

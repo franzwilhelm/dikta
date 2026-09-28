@@ -51,9 +51,10 @@ private actor WhisperWorker {
     }
 
     func transcribe(_ samples: [Float], locale: String) throws -> [WhisperWord] {
+        let prompt = Vocabulary.whisperPrompt
         let result = samples.withUnsafeBufferPointer { audio in
             diktat_whisper_run(handle.pointer, audio.baseAddress, Int32(audio.count),
-                               locale == "nb-NO" ? "no" : "en", NBWhisperAssets.vad.path)
+                               locale == "nb-NO" ? "no" : "en", NBWhisperAssets.vad.path, prompt)
         }
         if result == -2 { throw CancellationError() }
         guard result == 0 else {
