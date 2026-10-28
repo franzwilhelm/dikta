@@ -54,12 +54,14 @@ fylles, stopper opptaket med en feilmelding. Allerede ferdig tekst beholdes for
 manuell kopiering. Avbryt stopper også aktiv modellbehandling.
 
 Bytter mikrofonen under opptak, for eksempel når AirPods kobles til eller fra,
-startes lyden på nytt med en ny lydmotor. Appen prøver tre ganger, siste gang med
-Mac-mikrofonen. Lykkes ingen av dem, stopper opptaket: alt som allerede er tatt
+startes lyden på nytt. Appen prøver tre ganger, siste gang med Mac-mikrofonen. Lykkes ingen av dem, stopper opptaket: alt som allerede er tatt
 opp, transkriberes og kopieres uten innliming, og panelet blir stående med
 beskjed. Teksten fra en feilet økt kan også hentes med «Kopier siste tekst».
-En stoppet lydmotor frigjøres først etter ti sekunder, fordi macOS ellers kan
-krasje appen når motoren frigjøres mens lydenheten fortsatt melder endringer.
+Stoppede lydmotorer frigjøres aldri, men gjenbrukes. macOS kan krasje appen når
+en motor frigjøres mens lydenheten fortsatt melder endringer, og det kan vare i
+mange sekunder mens en Bluetooth-enhet bytter modus. Appen velger alltid
+mikrofonen uttrykkelig, også ved Systemstandard, fordi en gjenbrukt motor ellers
+beholder forrige mikrofon.
 
 Kilder og lisenser: [NB-Whisper Medium (Apache 2.0)](https://huggingface.co/NbAiLab/nb-whisper-medium),
 [whisper.cpp (MIT)](https://github.com/ggml-org/whisper.cpp/tree/v1.9.4),

@@ -40,6 +40,7 @@ Disse punktene er ikke bekreftet gjennom bygg eller kildekodegjennomgang:
 - [ ] «Tidligere økter»: ny diktering vises mens den pågår, og blir stående etter stopp, avbryt og feil.
 - [ ] Avslutt Dikta med `kill -9` under opptak: økten vises som «Ikke fullført» ved neste start, og lydopptaket kan transkriberes på nytt.
 - [ ] Koble AirPods til og fra flere ganger under opptak, med både Mac-mikrofonen og AirPods valgt: ingen krasj, opptaket fortsetter, eller stopper med beskjed og kopiert tekst.
+- [ ] Bytt mellom Systemstandard og en valgt mikrofon mellom to dikteringer: andre diktering bruker den nye.
 - [ ] «Kopier siste tekst» virker etter en avbrutt eller feilet senere økt.
 - [ ] Panel vises over fullskjermsapper uten å ta tastaturfokus.
 
