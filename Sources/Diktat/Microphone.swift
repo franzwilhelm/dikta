@@ -22,8 +22,7 @@ private final class SoundGate: @unchecked Sendable {
 
 // One engine and the serial queue that is the only place it is touched.
 // Core Audio can block indefinitely while a Bluetooth headset changes mode; on
-// this queue that stalls only the engine, never the app, and a device change
-// simply gets a new link.
+// this queue that stalls only the engine, never the app.
 private final class EngineLink: @unchecked Sendable {
     let queue = DispatchQueue(label: "no.franzvonderlippe.Diktat.microphone")
     let engine = AVAudioEngine()
@@ -46,17 +45,33 @@ private final class EngineLink: @unchecked Sendable {
         }
     }
 
-    // Freeing an engine right after stop races AVAudioIOUnit's own property
-    // listener queue, which then messages the freed engine and crashes the app.
-    // Keep the stopped engine until those callbacks have run.
+    // Stops the engine and hands it back to the pool once the queue has done so.
     func teardown() {
         queue.async { [self] in
             if let observer { NotificationCenter.default.removeObserver(observer) }
             observer = nil
             engine.stop()
             engine.inputNode.removeTap(onBus: 0)
-            queue.asyncAfter(deadline: .now() + 10) { withExtendedLifetime(self) {} }
+            Task { @MainActor in EnginePool.give(self) }
         }
+    }
+}
+
+// AVAudioEngine cannot be freed safely. Its IO unit answers device changes on a
+// queue of its own, and a listener still running there, often blocked in Core
+// Audio while a Bluetooth headset switches mode, then writes to freed memory.
+// Stopped engines are reused instead, so only a handful ever exist.
+@MainActor
+private enum EnginePool {
+    private static var idle: [EngineLink] = []
+
+    static func take() -> EngineLink {
+        idle.isEmpty ? EngineLink() : idle.removeFirst()
+    }
+
+    static func give(_ link: EngineLink) {
+        guard !idle.contains(where: { $0 === link }) else { return }
+        idle.append(link)
     }
 }
 
@@ -75,9 +90,10 @@ private final class Once: @unchecked Sendable {
     }
 }
 
-// Owns the input for one recording. Changing the input device leaves an engine
-// with stale formats, and tapping it can raise an uncatchable exception. A device
-// change therefore builds a fresh engine and taps it in its own format.
+// Owns the input for one recording. Changing the input device can leave an
+// engine with stale formats, and tapping it then raises an uncatchable
+// exception. Formats are therefore checked before every tap, and a device
+// change retries until they agree.
 @MainActor
 final class Microphone {
     private var link: EngineLink?
@@ -90,14 +106,19 @@ final class Microphone {
     private var device: InputDevice?
     private var shownDevice: String?
 
-    // Opens a fresh engine on the chosen microphone and returns its format.
+    isolated deinit {
+        link?.teardown()
+    }
+
+    // Opens an engine on the chosen microphone and returns its format.
     func open() async throws -> AVAudioFormat {
-        try await retrying { builtIn in try await openEngine(builtIn: builtIn) }
+        try await retrying { lastTry in try await openEngine(lastTry: lastTry) }
     }
 
     // A Bluetooth headset can need a few seconds to switch mode. Try again, and
-    // on the last attempt use the Mac's own microphone rather than give up.
-    private func retrying<T>(_ work: (_ builtIn: Bool) async throws -> T) async throws -> T {
+    // on the last attempt use a new engine and the Mac's own microphone rather
+    // than give up.
+    private func retrying<T>(_ work: (_ lastTry: Bool) async throws -> T) async throws -> T {
         let attempts = 3
         for attempt in 1..<attempts {
             do { return try await work(false) } catch {}
@@ -106,17 +127,23 @@ final class Microphone {
         return try await work(true)
     }
 
-    private func openEngine(builtIn: Bool) async throws -> AVAudioFormat {
+    private func openEngine(lastTry: Bool) async throws -> AVAudioFormat {
         link?.teardown()
-        let link = EngineLink()
+        let link = lastTry ? EngineLink() : EnginePool.take()
         self.link = link
         let (device, format) = try await link.run(within: 4) { engine -> (InputDevice?, AVAudioFormat?) in
             let inputs = AudioDevices.inputs
-            var device = builtIn ? AudioDevices.builtInMicrophone(in: inputs) : AudioDevices.chosen(from: inputs)
+            let wanted = lastTry ? AudioDevices.builtInMicrophone(in: inputs) : AudioDevices.chosen(from: inputs)
+            // A reused engine keeps its last device, so always name the one to use.
+            var device = wanted ?? AudioDevices.systemDefault
             if var id = device?.id, let unit = engine.inputNode.audioUnit {
                 let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
                                                   0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
-                if status != noErr { device = nil }
+                if status != noErr {
+                    // A reused engine would silently keep its old device; try again instead.
+                    guard lastTry else { return (nil, nil) }
+                    device = nil
+                }
             }
             let format = engine.inputNode.inputFormat(forBus: 0)
             let valid = format.sampleRate > 0 && format.channelCount > 0
@@ -137,9 +164,9 @@ final class Microphone {
     }
 
     private func connect() async throws {
-        try await retrying { builtIn in
+        try await retrying { lastTry in
             guard tap != nil else { return }
-            _ = try await openEngine(builtIn: builtIn)
+            _ = try await openEngine(lastTry: lastTry)
             guard tap != nil, let link else { return }
             try await run(on: link)
         }
