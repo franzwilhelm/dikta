@@ -76,6 +76,22 @@ Resultatet kopieres bare, aldri limes inn automatisk, siden filvelgeren gjør
 forgrunnsappen uforutsigbar. Filen leses kun; teksten lagres i historikken,
 men selve filen kopieres ikke.
 
+## Rydd opp teksten
+
+Valget er av som standard. Når det er på og Apple Intelligence er klar, sendes
+teksten gjennom Apples språkmodell på Mac-en (FoundationModels), uten nett. Den
+fjerner fyllord, stamming, gjentakelser og ord som rettes med en gang.
+
+Teksten deles i biter på opptil rundt 40 ord langs setningsgrenser. Ferdige biter
+ryddes mens du snakker, så ved stopp gjenstår som regel bare den siste. Hver bit
+tar 0,5–3 sekunder og gis opp etter 15.
+
+Modellen svarer lett på spørsmål eller utfører oppdrag i teksten («skriv en
+e-post til …»). Hver bit godtas derfor bare hvis minst 90 % av ordene finnes i
+det som ble sagt, minst 70 % av de ulike ordene og 60 % av alle ordene (fyllord
+ikke medregnet) står igjen, og teksten ikke blir lengre. Ellers brukes biten slik
+den ble diktert. Originalen lagres i historikken når teksten er endret.
+
 ## Tidligere økter
 
 Hver diktering og filtranskripsjon lagres i
@@ -125,6 +141,7 @@ KeyboardShortcuts 3.1.0 ligger i `Vendor/` med MIT-lisens og dokumenterte tilpas
 - `TextDelivery.swift`: utklippstavle, målapp og innliming.
 - `SessionHistory.swift` og `AudioArchive.swift`: lagring av økter og lydopptak.
 - `HistoryView.swift`: vinduet «Tidligere økter».
+- `TextCleaner.swift`: opprydding med Apples språkmodell og kontroll av resultatet.
 - `RecordingPanel.swift`: flytende AppKit-panel med SwiftUI-innhold.
 - `DiktatApp.swift`: menyfelt og innstillinger.
 

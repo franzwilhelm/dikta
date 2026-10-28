@@ -25,6 +25,7 @@ For å oppdatere: avslutt Dikta og kjør samme kommando igjen.
 - **Innstillinger:** Velg NB-Whisper (Medium/Large) eller Mac-diktasjon, norsk eller engelsk, og automatisk innliming eller bare kopiering.
 - **Lydfil:** «Transkriber lydfil …» i menyen tar et opptak fra f.eks. mobilen (m4a, mp3, wav) og kopierer teksten.
 - **Kopier igjen:** «Kopier siste tekst» i menyen.
+- **Rydd opp teksten:** Valgfritt, av som standard. Fjerner fyllord, stamming og gjentakelser med Apples språkmodell på Mac-en. Krever Apple Intelligence.
 - **Tidligere økter:** «Tidligere økter …» i menyen viser alle dikteringer og transkriberte lydfiler, med søk, kopiering og ny transkripsjon av lydopptaket.
 
 Tale behandles lokalt. Hver økt lagres med tekst og lyd på din Mac, i `~/Library/Application Support/Diktat/History`, også hvis appen krasjer underveis. Transkripsjonen kan inneholde feil eller utelatelser.

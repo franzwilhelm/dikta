@@ -46,6 +46,9 @@ final class SessionController: ObservableObject {
             if automaticallyPaste { requestAutomaticPasteAccess() }
         }
     }
+    @Published var cleanUpText = UserDefaults.standard.bool(forKey: "cleanUpText") {
+        didSet { UserDefaults.standard.set(cleanUpText, forKey: "cleanUpText") }
+    }
     @Published private(set) var accessibilityGranted = TextDelivery.hasAccessibility
     private var checkedStartupAccess = false
 
@@ -71,6 +74,7 @@ final class SessionController: ObservableObject {
     private var session: SpeechSession?
     private let history = SessionHistory.shared
     private var entryID: UUID?
+    private var cleaner: TextCleaner?
     private var operation: Task<Void, Never>?
     private var timeout: Task<Void, Never>?
     private let delivery = TextDelivery()
@@ -144,6 +148,9 @@ final class SessionController: ObservableObject {
         let (entryID, archive) = history.begin(origin, engine: engine, locale: locale, seconds: seconds,
                                                recordsAudio: !source.isFile)
         self.entryID = entryID
+        self.cleaner?.cancel()
+        let cleaner = cleanUpText && TextCleaner.unavailableReason == nil ? TextCleaner() : nil
+        self.cleaner = cleaner
         session.onLevel = { [weak self, weak session] level in
             guard let self, self.session === session, self.phase == .recording else { return }
             self.audioLevel = level
@@ -177,6 +184,7 @@ final class SessionController: ObservableObject {
             guard let self, self.session === session else { return }
             self.text = text
             self.history.update(entryID, text: text)
+            cleaner?.prepare(text)
         }
         session.onFailure = { [weak self, weak session] error in
             guard let self, self.session === session else { return }
@@ -265,6 +273,7 @@ final class SessionController: ObservableObject {
         delivery.captureTarget()
         let shouldPaste = shouldPaste ?? automaticallyPaste
         let entryID = entryID
+        let cleaner = cleaner
         let timeoutSeconds = session.finalizationTimeout
         timeout = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(timeoutSeconds)) } catch { return }
@@ -274,15 +283,22 @@ final class SessionController: ObservableObject {
         operation = Task { [weak self] in
             guard let self else { return }
             do {
-                let finalText = try await session.finish()
+                let dictated = try await session.finish()
                 guard self.session === session, self.phase == .finishing else { return }
+                var finalText = dictated
+                if let cleaner, !dictated.isEmpty {
+                    self.message = "Rydder opp teksten …"
+                    finalText = await cleaner.finish(dictated)
+                    guard self.session === session, self.phase == .finishing else { return }
+                }
                 self.timeout?.cancel()
                 self.progressTask?.cancel()
                 self.progress = 100
                 self.text = finalText
                 if let entryID {
                     let status: HistoryEntry.Status = interruption == nil ? .done : .interrupted
-                    self.history.finish(entryID, text: finalText, status: status, note: interruption)
+                    let original = finalText == dictated ? nil : dictated
+                    self.history.finish(entryID, text: finalText, original: original, status: status, note: interruption)
                 }
                 if finalText.isEmpty {
                     self.message = "Ingen tale oppfattet."
@@ -334,6 +350,7 @@ final class SessionController: ObservableObject {
         operation?.cancel()
         timeout?.cancel()
         progressTask?.cancel()
+        cleaner?.cancel()
         delivery.reset()
         message = "Avbryter …"
         let entryID = entryID
@@ -355,6 +372,7 @@ final class SessionController: ObservableObject {
         operation?.cancel()
         timeout?.cancel()
         progressTask?.cancel()
+        cleaner?.cancel()
         delivery.reset()
         message = error.localizedDescription
         // The next dictation clears the text; keep it reachable through «Kopier siste tekst».

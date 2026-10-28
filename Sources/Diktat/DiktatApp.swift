@@ -31,6 +31,8 @@ struct DiktatApp: App {
             }.disabled(controller.isBusy)
             Toggle("Lim inn automatisk", isOn: $controller.automaticallyPaste)
                 .disabled(controller.isBusy)
+            Toggle("Rydd opp teksten", isOn: $controller.cleanUpText)
+                .disabled(controller.isBusy)
             Button("Kopier siste tekst") { controller.copyLast() }.disabled(controller.lastText.isEmpty)
             Button("Tidligere økter …") { delegate.showHistory(controller: controller) }
             if controller.phase == .failed && !controller.text.isEmpty {
@@ -133,6 +135,7 @@ private struct SettingsView: View {
     @ObservedObject private var models = WhisperModels.shared
     @State private var permissionMessage = ""
     @State private var microphones: [InputDevice] = []
+    @State private var cleanupProblem: String?
     @AppStorage(AudioDevices.preferenceKey) private var microphoneUID = AudioDevices.builtIn
     @AppStorage(Vocabulary.key) private var vocabulary = Vocabulary.defaultText
     var body: some View {
@@ -163,6 +166,13 @@ private struct SettingsView: View {
                 Toggle("Lim inn automatisk", isOn: $controller.automaticallyPaste)
                 Text("Når valget er av, kopieres teksten bare. Teksten beholdes på utklippstavlen i begge modi.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("Rydd opp teksten", isOn: $controller.cleanUpText)
+                Text("Fjerner fyllord, stamming og gjentakelser med Apples språkmodell på denne Mac-en. Tar et par sekunder ved stopp. Hvis resultatet ikke ligner det du sa, brukes teksten slik den ble diktert. Originalen lagres alltid i «Tidligere økter».")
+                    .font(.caption).foregroundStyle(.secondary)
+                if controller.cleanUpText, let cleanupProblem {
+                    Text(cleanupProblem).font(.caption).foregroundStyle(.orange)
+                    Button("Åpne Apple Intelligence-innstillinger …") { openSettings("com.apple.Siri-Settings.extension") }
+                }
             }.disabled(controller.isBusy)
             Section("Egne ord") {
                 TextEditor(text: $vocabulary)
@@ -225,10 +235,17 @@ private struct SettingsView: View {
         .task {
             while !Task.isCancelled {
                 controller.refreshAccessibility()
+                cleanupProblem = TextCleaner.unavailableReason
                 // Core Audio can block while a Bluetooth headset switches mode; keep that off the main thread.
                 microphones = await Task.detached { AudioDevices.inputs }.value
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
+        }
+    }
+
+    private func openSettings(_ pane: String) {
+        if let url = URL(string: "x-apple.systempreferences:\(pane)") {
+            NSWorkspace.shared.open(url)
         }
     }
 
