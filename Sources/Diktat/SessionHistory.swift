@@ -20,6 +20,8 @@ struct HistoryEntry: Codable, Identifiable, Hashable {
     var seconds: Double?
     var microphone: String?
     var text = ""
+    // The dictated text, kept when cleanup changed it.
+    var original: String?
     var status = Status.active
     var note: String?
     var audio: String?
@@ -96,11 +98,12 @@ final class SessionHistory: ObservableObject {
     }
 
     // Call once the session's audio has stopped, so the recording is complete.
-    func finish(_ id: UUID, text: String, status: HistoryEntry.Status, note: String? = nil) {
+    func finish(_ id: UUID, text: String, original: String? = nil, status: HistoryEntry.Status, note: String? = nil) {
         let recorded = archives.removeValue(forKey: id)?.close()
         guard let index = index(of: id) else { return }
         var entry = entries[index]
         entry.text = text
+        entry.original = original
         entry.status = status
         entry.note = note
         if let recorded { entry.seconds = recorded }

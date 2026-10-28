@@ -18,6 +18,7 @@ struct HistoryView: View {
         guard !words.isEmpty else { return history.entries }
         return history.entries.filter { entry in
             if entry.text.localizedCaseInsensitiveContains(words) { return true }
+            if entry.original?.localizedCaseInsensitiveContains(words) == true { return true }
             if case .file(let name) = entry.source { return name.localizedCaseInsensitiveContains(words) }
             return false
         }
@@ -155,8 +156,13 @@ private struct HistoryDetail: View {
     let onDelete: () -> Void
     @State private var confirmingDelete = false
     @State private var copied = false
+    @State private var showOriginal = false
 
     private var audio: URL? { history.audioURL(for: entry) }
+    private var shownText: String {
+        if showOriginal, let original = entry.original { return original }
+        return entry.text
+    }
     private var canTranscribe: Bool { audio != nil && !controller.isBusy && entry.status != .active }
 
     var body: some View {
@@ -172,6 +178,17 @@ private struct HistoryDetail: View {
             .padding(.horizontal, 24)
             .padding(.top, 20)
             .padding(.bottom, 14)
+            if entry.original != nil {
+                Picker("Tekst", selection: $showOriginal) {
+                    Text("Ryddet").tag(false)
+                    Text("Slik den ble diktert").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .padding(.horizontal, 24)
+                .padding(.bottom, 14)
+            }
             if let badge = HistoryFormat.badge(entry), let notice = HistoryFormat.notice(entry) {
                 HStack(spacing: 10) {
                     Image(systemName: badge.symbol).foregroundStyle(badge.tint)
@@ -189,10 +206,10 @@ private struct HistoryDetail: View {
             }
             Divider()
             ScrollView {
-                Text(entry.text.isEmpty ? "Ingen tekst." : entry.text)
+                Text(shownText.isEmpty ? "Ingen tekst." : shownText)
                     .font(.system(size: 15))
                     .lineSpacing(4)
-                    .foregroundStyle(entry.text.isEmpty ? .secondary : .primary)
+                    .foregroundStyle(shownText.isEmpty ? .secondary : .primary)
                     .textSelection(.enabled)
                     .frame(maxWidth: 680, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -204,13 +221,16 @@ private struct HistoryDetail: View {
         } message: {
             Text("Teksten og lydopptaket slettes fra denne Mac-en.")
         }
-        .onChange(of: entry.id) { copied = false }
+        .onChange(of: entry.id) {
+            copied = false
+            showOriginal = false
+        }
     }
 
     private var actions: some View {
         HStack(spacing: 2) {
             Button { copy() } label: { Label("Kopier teksten", systemImage: copied ? "checkmark" : "doc.on.doc") }
-                .disabled(entry.text.isEmpty)
+                .disabled(shownText.isEmpty)
                 .help("Kopier teksten")
             if audio != nil {
                 Button { controller.transcribe(entry) } label: {
@@ -252,7 +272,7 @@ private struct HistoryDetail: View {
     }
 
     private func copy() {
-        guard TextDelivery.copy(entry.text) else { return }
+        guard TextDelivery.copy(shownText) else { return }
         copied = true
         Task {
             try? await Task.sleep(for: .seconds(1.5))
