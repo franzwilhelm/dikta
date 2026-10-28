@@ -46,12 +46,16 @@ private final class EngineLink: @unchecked Sendable {
         }
     }
 
+    // Freeing an engine right after stop races AVAudioIOUnit's own property
+    // listener queue, which then messages the freed engine and crashes the app.
+    // Keep the stopped engine until those callbacks have run.
     func teardown() {
         queue.async { [self] in
             if let observer { NotificationCenter.default.removeObserver(observer) }
             observer = nil
             engine.stop()
             engine.inputNode.removeTap(onBus: 0)
+            queue.asyncAfter(deadline: .now() + 10) { withExtendedLifetime(self) {} }
         }
     }
 }
@@ -80,6 +84,7 @@ final class Microphone {
     private var tap: AVAudioNodeTapBlock?
     private var onFailure: ((Error) -> Void)?
     private var restart: Task<Void, Never>?
+    private var changes = 0
     // Which microphone is in use, and whether real sound has arrived from it yet.
     var onInput: ((InputDevice?, Bool) -> Void)?
     private var device: InputDevice?
@@ -87,11 +92,27 @@ final class Microphone {
 
     // Opens a fresh engine on the chosen microphone and returns its format.
     func open() async throws -> AVAudioFormat {
+        try await retrying { builtIn in try await openEngine(builtIn: builtIn) }
+    }
+
+    // A Bluetooth headset can need a few seconds to switch mode. Try again, and
+    // on the last attempt use the Mac's own microphone rather than give up.
+    private func retrying<T>(_ work: (_ builtIn: Bool) async throws -> T) async throws -> T {
+        let attempts = 3
+        for attempt in 1..<attempts {
+            do { return try await work(false) } catch {}
+            try await Task.sleep(for: .milliseconds(500 * attempt))
+        }
+        return try await work(true)
+    }
+
+    private func openEngine(builtIn: Bool) async throws -> AVAudioFormat {
         link?.teardown()
         let link = EngineLink()
         self.link = link
         let (device, format) = try await link.run(within: 4) { engine -> (InputDevice?, AVAudioFormat?) in
-            var device = AudioDevices.chosen(from: AudioDevices.inputs)
+            let inputs = AudioDevices.inputs
+            var device = builtIn ? AudioDevices.builtInMicrophone(in: inputs) : AudioDevices.chosen(from: inputs)
             if var id = device?.id, let unit = engine.inputNode.audioUnit {
                 let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
                                                   0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
@@ -109,11 +130,23 @@ final class Microphone {
     func start(tap: @escaping AVAudioNodeTapBlock, onFailure: @escaping (Error) -> Void) async throws {
         self.tap = tap
         self.onFailure = onFailure
-        try await run()
+        if let link {
+            do { try await run(on: link); return } catch {}
+        }
+        try await connect()
     }
 
-    private func run() async throws {
-        guard let tap, let link else { throw DiktatError(message: "Ingen tilgjengelig mikrofon.") }
+    private func connect() async throws {
+        try await retrying { builtIn in
+            guard tap != nil else { return }
+            _ = try await openEngine(builtIn: builtIn)
+            guard tap != nil, let link else { return }
+            try await run(on: link)
+        }
+    }
+
+    private func run(on link: EngineLink) async throws {
+        guard let tap else { throw DiktatError(message: "Ingen tilgjengelig mikrofon.") }
         let gate = SoundGate()
         let device = device
         // Keep the bars when the same microphone comes back; show its icon only for a new one.
@@ -125,17 +158,28 @@ final class Microphone {
             Task { @MainActor [weak self] in self?.onInput?(device, true) }
         }
         let box = TapBox(block: Self.gated(tap, gate: gate, heard: heard))
-        let changed: @Sendable () -> Void = { [weak self] in
-            Task { @MainActor [weak self] in self?.scheduleRestart() }
+        let changed: @Sendable () -> Void = { [weak self, weak link] in
+            let source = link
+            Task { @MainActor [weak self] in self?.scheduleRestart(for: source) }
         }
         try await link.run(within: 4) { [link] engine in
+            let input = engine.inputNode
+            // Tapping a device that has no format yet, or one the engine has not
+            // caught up with, raises an exception that Swift cannot catch.
+            let hardware = input.inputFormat(forBus: 0)
+            let tapped = input.outputFormat(forBus: 0)
+            guard hardware.sampleRate > 0, hardware.channelCount > 0,
+                  tapped.sampleRate == hardware.sampleRate, tapped.channelCount > 0 else {
+                throw DiktatError(message: "Mikrofonen er ikke klar.")
+            }
             // nil lets the engine tap in the device's current format; AudioFeed converts per buffer.
-            engine.inputNode.installTap(onBus: 0, bufferSize: 2048, format: nil, block: box.block)
+            input.installTap(onBus: 0, bufferSize: 2048, format: nil, block: box.block)
             let observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
                                                                   object: engine, queue: nil) { _ in changed() }
             engine.prepare()
             do { try engine.start() } catch {
                 NotificationCenter.default.removeObserver(observer)
+                input.removeTap(onBus: 0)
                 throw error
             }
             link.observer = observer
@@ -152,36 +196,38 @@ final class Microphone {
         }
     }
 
-    // Device changes arrive in bursts; rebuild once the route has settled.
-    private func scheduleRestart() {
-        restart?.cancel()
+    // Device changes arrive in bursts; rebuild once the route has settled. Only
+    // the current engine counts, and a rebuild waits for the one before it, so
+    // two rebuilds never tap the same engine.
+    private func scheduleRestart(for source: EngineLink?) {
+        guard let source, source === link, tap != nil else { return }
+        changes += 1
+        let change = changes
+        let previous = restart
         restart = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
-            await self?.rebuildIfStopped()
+            await previous?.value
+            guard let self, self.changes == change else { return }
+            await self.rebuildIfStopped()
         }
     }
 
     // Selecting a microphone also posts a configuration change. Only a change
     // that actually stopped the engine (a device came or went) needs a rebuild.
     private func rebuildIfStopped() async {
-        guard let link else { return }
+        guard let link, tap != nil else { return }
         let running = (try? await link.run(within: 2) { engine in engine.isRunning }) ?? false
         guard !running, self.link === link else { return }
         await rebuild()
     }
 
     private func rebuild() async {
-        guard tap != nil else { return }
-        do {
-            _ = try await open()
-            guard tap != nil else { link?.teardown(); return }
-            try await run()
-        } catch {
+        do { try await connect() } catch {
             guard tap != nil else { return }
             link?.teardown()
             link = nil
             tap = nil
-            onFailure?(DiktatError(message: "Mikrofonen ble endret og kunne ikke startes igjen. Ferdig tekst er bevart."))
+            onFailure?(DiktatError(message: "Mikrofonen falt ut og kunne ikke startes igjen."))
         }
     }
 

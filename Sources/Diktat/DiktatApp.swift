@@ -32,6 +32,7 @@ struct DiktatApp: App {
             Toggle("Lim inn automatisk", isOn: $controller.automaticallyPaste)
                 .disabled(controller.isBusy)
             Button("Kopier siste tekst") { controller.copyLast() }.disabled(controller.lastText.isEmpty)
+            Button("Tidligere økter …") { delegate.showHistory(controller: controller) }
             if controller.phase == .failed && !controller.text.isEmpty {
                 Button("Kopier tilgjengelig tekst etter feil") { controller.copyRecovery() }
             }
@@ -60,6 +61,7 @@ struct DiktatApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var settingsWindow: NSWindow?
+    private var historyWindow: NSWindow?
     // Sparkle reads SUFeedURL and SUPublicEDKey from Info.plist and checks in the background.
     private let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
     @Published private(set) var canCheckForUpdates = false
@@ -82,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             shuttingDown = true
             Task {
                 await NBWhisper.shared.shutdown()
+                SessionHistory.shared.flush()
                 readyToTerminate = true
                 sender.terminate(nil)
             }
@@ -105,6 +108,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
         NSApp.activate()
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func showHistory(controller: SessionController) {
+        if historyWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 580),
+                                  styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                                  backing: .buffered, defer: false)
+            window.title = "Dikta – tidligere økter"
+            window.isReleasedWhenClosed = false
+            window.contentMinSize = NSSize(width: 720, height: 440)
+            window.contentView = NSHostingView(rootView: HistoryView(history: .shared, controller: controller))
+            window.center()
+            window.setFrameAutosaveName("DiktaHistory")
+            historyWindow = window
+        }
+        NSApp.activate()
+        historyWindow?.makeKeyAndOrderFront(nil)
     }
 }
 
@@ -196,7 +216,7 @@ private struct SettingsView: View {
                     }
                 }
                 if !permissionMessage.isEmpty { Text(permissionMessage).font(.caption) }
-                Text("Begge motorene behandler tale lokalt. Lyd og tekst holdes i minnet. Siste ferdige tekst kan kopieres frem til appen avsluttes.")
+                Text("Begge motorene behandler tale lokalt. Hver økt lagres med tekst og lyd på denne Mac-en og finnes under «Tidligere økter» i menyen.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -205,7 +225,8 @@ private struct SettingsView: View {
         .task {
             while !Task.isCancelled {
                 controller.refreshAccessibility()
-                microphones = AudioDevices.inputs
+                // Core Audio can block while a Bluetooth headset switches mode; keep that off the main thread.
+                microphones = await Task.detached { AudioDevices.inputs }.value
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
         }

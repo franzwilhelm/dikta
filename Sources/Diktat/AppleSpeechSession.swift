@@ -17,12 +17,14 @@ final class AppleSpeechSession: DictationSession {
     var onLevel: ((Float) -> Void)?
     var onText: ((String) -> Void)?
     var onFailure: ((Error) -> Void)?
+    var onInterrupted: ((Error) -> Void)?
     var onStatus: ((String) -> Void)?
     var processingProgress: Double { 0 } // Apple exposes no finalization progress.
     private var fileSeconds = 0.0
     var finalizationTimeout: Double { max(30, fileSeconds * 2) }
 
-    func start(source: AudioSource, locale identifier: String, status: (String) -> Void) async throws {
+    func start(source: AudioSource, locale identifier: String, archive: AudioArchive?,
+               status: (String) -> Void) async throws {
         if !source.isFile {
             guard await AVCaptureDevice.requestAccess(for: .audio) else {
                 throw DiktatError(message: "Mikrofontilgang mangler. Åpne Systeminnstillinger → Personvern og sikkerhet → Mikrofon.")
@@ -63,14 +65,14 @@ final class AppleSpeechSession: DictationSession {
         }
         switch source {
         case .microphone:
-            try await startMicrophone(analyzer: analyzer, transcriber: transcriber, status: status)
+            try await startMicrophone(analyzer: analyzer, transcriber: transcriber, archive: archive, status: status)
         case .file(let url):
             try await startFile(url, analyzer: analyzer, transcriber: transcriber, status: status)
         }
     }
 
     private func startMicrophone(analyzer: SpeechAnalyzer, transcriber: DictationTranscriber,
-                                 status: (String) -> Void) async throws {
+                                 archive: AudioArchive?, status: (String) -> Void) async throws {
         status("Klargjør mikrofon …")
         let input = try await microphone.open()
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber], considering: input) else {
@@ -85,18 +87,26 @@ final class AppleSpeechSession: DictationSession {
                 self.onLevel?(level)
             }
         }, consume: { buffer in
+            archive?.write(buffer)
             if case .dropped = continuation.yield(AnalyzerInput(buffer: buffer)) {
                 throw DiktatError(message: "Talegjenkjenningen klarte ikke å holde følge.")
             }
-        }, end: { error in
-            continuation.finish(throwing: error)
+        }, end: { [weak self] error in
+            // Audio that already arrived is still transcribed; only capture stops.
+            continuation.finish()
+            if let error {
+                Task { @MainActor [weak self] in
+                    guard let self, !self.cancelled else { return }
+                    self.onInterrupted?(error)
+                }
+            }
         })
         self.feed = feed
         try await analyzer.start(inputSequence: stream)
         try checkCancellation()
         try await microphone.start(tap: feed.makeTap()) { [weak self] error in
             guard let self, !self.cancelled else { return }
-            self.onFailure?(error)
+            self.onInterrupted?(error)
         }
     }
 

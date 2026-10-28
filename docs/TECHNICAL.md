@@ -49,11 +49,17 @@ fremdriftsrapportering og står på 0 % til filtranskripsjonen er fullført.
 Tekstforhåndsvisning og løpende status er fjernet fra opptakspanelet for begge
 motorene. Feil vises fortsatt med mulighet for kopiering.
 
-Lyd og tekst holdes bare i minnet. Køen har plass til åtte ventende bolker; hvis
-Whisper ikke holder følge og køen fylles, stopper opptaket med en feilmelding.
-Allerede ferdig tekst beholdes for manuell kopiering. Avbryt stopper også aktiv
-modellbehandling. Ingen lydfiler eller transkripsjonshistorikk lagres av appen;
-minnebufferen overlever ikke et appkrasj.
+Køen har plass til åtte ventende bolker; hvis Whisper ikke holder følge og køen
+fylles, stopper opptaket med en feilmelding. Allerede ferdig tekst beholdes for
+manuell kopiering. Avbryt stopper også aktiv modellbehandling.
+
+Bytter mikrofonen under opptak, for eksempel når AirPods kobles til eller fra,
+startes lyden på nytt med en ny lydmotor. Appen prøver tre ganger, siste gang med
+Mac-mikrofonen. Lykkes ingen av dem, stopper opptaket: alt som allerede er tatt
+opp, transkriberes og kopieres uten innliming, og panelet blir stående med
+beskjed. Teksten fra en feilet økt kan også hentes med «Kopier siste tekst».
+En stoppet lydmotor frigjøres først etter ti sekunder, fordi macOS ellers kan
+krasje appen når motoren frigjøres mens lydenheten fortsatt melder endringer.
 
 Kilder og lisenser: [NB-Whisper Medium (Apache 2.0)](https://huggingface.co/NbAiLab/nb-whisper-medium),
 [whisper.cpp (MIT)](https://github.com/ggml-org/whisper.cpp/tree/v1.9.4),
@@ -67,7 +73,28 @@ samme AudioFeed-konvertering som mikrofonen, slik at begge motorene ser identisk
 format. Hele filen dekodes før behandling; køen er ubegrenset, og panelet viser
 prosent behandlet lyd for Whisper. Tidsgrensen skaleres med lydlengden.
 Resultatet kopieres bare, aldri limes inn automatisk, siden filvelgeren gjør
-forgrunnsappen uforutsigbar. Filen leses kun; ingenting skrives eller lagres.
+forgrunnsappen uforutsigbar. Filen leses kun; teksten lagres i historikken,
+men selve filen kopieres ikke.
+
+## Tidligere økter
+
+Hver diktering og filtranskripsjon lagres i
+`~/Library/Application Support/Diktat/History/<id>/`: `entry.json` med tekst,
+tidspunkt, varighet, motor, språk, mikrofon og status, og for diktering også
+lydopptaket. Teksten lagres underveis, høyst én gang i sekundet. Lyden skrives
+som ukomprimert CAF mens du snakker, fordi den filen kan leses selv om appen
+krasjer før den lukkes. Når økten er ferdig, komprimeres den til AAC (`audio.m4a`,
+ca. 20 MB i timen), og CAF-filen slettes.
+
+Økter som fortsatt står som pågående ved neste oppstart, ble avbrutt av krasj
+eller avslutning. De vises som «Ikke fullført», med teksten fram til da og
+lydopptaket. Ett trykk på hurtigtasten uten tale (under to sekunder, uten tekst)
+lagres ikke. Forkastede og feilede økter lagres også.
+
+«Tidligere økter …» i menyen viser øktene gruppert per dag, med søk i teksten.
+Derfra kan teksten kopieres, økten slettes, mappen vises i Finder, og lydopptaket
+transkriberes på nytt med valgt motor. En ny transkripsjon blir en egen økt, så
+den opprinnelige teksten aldri overskrives. Ingenting slettes automatisk.
 
 ## Bygg og installer
 
@@ -96,10 +123,12 @@ KeyboardShortcuts 3.1.0 ligger i `Vendor/` med MIT-lisens og dokumenterte tilpas
 - `TranscriptBuffer.swift`: endelige og foreløpige Apple-segmenter.
 - `SessionController.swift`: én aktiv økt, avbryt, tidsgrense og feilbehandling.
 - `TextDelivery.swift`: utklippstavle, målapp og innliming.
+- `SessionHistory.swift` og `AudioArchive.swift`: lagring av økter og lydopptak.
+- `HistoryView.swift`: vinduet «Tidligere økter».
 - `RecordingPanel.swift`: flytende AppKit-panel med SwiftUI-innhold.
 - `DiktatApp.swift`: menyfelt og innstillinger.
 
-Innstillinger og nedlastede modeller lagres permanent. Dikta skriver ikke
+Innstillinger, nedlastede modeller og tidligere økter lagres permanent. Dikta skriver ikke
 taleinnhold til systemlogger. Utklippstavlen administreres av macOS og kan inngå
 i systemets synkronisering eller en utklippstavle-app. Begge motorene kjører lokalt.
 

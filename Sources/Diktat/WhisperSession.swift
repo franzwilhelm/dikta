@@ -47,7 +47,7 @@ final class WhisperChunks: @unchecked Sendable {
         submittedSamples += chunk.samples.count
         submittedBlocks += 1
         if case .dropped = continuation.yield(chunk) {
-            throw DiktatError(message: "Whisper-køen ble for lang. Opptaket er stoppet; ferdig tekst kan kopieres.")
+            throw DiktatError(message: "Whisper holdt ikke følge, så opptaket ble stoppet.")
         }
     }
 
@@ -100,6 +100,7 @@ final class WhisperSession: DictationSession {
     var onLevel: ((Float) -> Void)?
     var onText: ((String) -> Void)?
     var onFailure: ((Error) -> Void)?
+    var onInterrupted: ((Error) -> Void)?
     var onStatus: ((String) -> Void)?
     private let microphone = Microphone()
     var onInput: ((InputDevice?, Bool) -> Void)? {
@@ -133,20 +134,21 @@ final class WhisperSession: DictationSession {
         return isFile ? max(180 * 10, audioSeconds * 3) : 180 * 10
     }
 
-    func start(source: AudioSource, locale: String, status: (String) -> Void) async throws {
+    func start(source: AudioSource, locale: String, archive: AudioArchive?, status: (String) -> Void) async throws {
         guard let output = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000,
                                          channels: 1, interleaved: false) else {
             throw DiktatError(message: "Kunne ikke opprette lydformat.")
         }
         switch source {
         case .microphone:
-            try await startMicrophone(output: output, locale: locale, status: status)
+            try await startMicrophone(output: output, locale: locale, archive: archive, status: status)
         case .file(let url):
             try await startFile(url, output: output, locale: locale, status: status)
         }
     }
 
-    private func startMicrophone(output: AVAudioFormat, locale: String, status: (String) -> Void) async throws {
+    private func startMicrophone(output: AVAudioFormat, locale: String, archive: AudioArchive?,
+                                 status: (String) -> Void) async throws {
         guard await AVCaptureDevice.requestAccess(for: .audio) else {
             throw DiktatError(message: "Mikrofontilgang mangler. Gi Dikta tilgang i Systeminnstillinger.")
         }
@@ -160,20 +162,22 @@ final class WhisperSession: DictationSession {
                 self.onLevel?(level)
             }
         }, consume: { buffer in
+            archive?.write(buffer)
             try chunks.append(buffer)
         }, end: { [weak self] error in
-            chunks.finish(error)
+            // Audio that already arrived is still transcribed; only capture stops.
+            chunks.finish(nil)
             if let error {
                 Task { @MainActor [weak self] in
                     guard let self, !self.cancelled else { return }
-                    self.onFailure?(error)
+                    self.onInterrupted?(error)
                 }
             }
         })
         self.feed = feed
         try await microphone.start(tap: feed.makeTap()) { [weak self] error in
             guard let self, !self.cancelled, !self.finishing else { return }
-            self.onFailure?(error)
+            self.onInterrupted?(error)
         }
         startedAt = Date()
     }
