@@ -1,8 +1,6 @@
-Dikta krasjer ikke lenger når AirPods kobles til og fra, og tar vare på alt du dikterer.
+Dikta krasjer ikke lenger når en Bluetooth-mikrofon kobles til eller fra.
 
-- Bytte av mikrofon under opptak, for eksempel AirPods inn og ut, får ikke lenger appen til å krasje.
-- Faller mikrofonen ut, blir det du allerede har sagt, transkribert og kopiert i stedet for å gå tapt.
-- Nytt vindu «Tidligere økter …» i menyen. Alle dikteringer og lydfiler lagres med tekst og lyd på Mac-en, også hvis appen stopper underveis. Du kan søke i dem, kopiere og transkribere lydopptaket på nytt.
-- Valgfritt: «Rydd opp teksten» fjerner fyllord, stamming og gjentakelser med Apples språkmodell på Mac-en. Av som standard, og krever Apple Intelligence.
+- Rettet en krasj som kunne komme når AirPods eller andre Bluetooth-hodetelefoner byttet modus, også rett etter at appen startet.
+- Kobler du til en hodetelefon midt i en diktering, kan Dikta fortsette med mikrofonen den startet med. Neste diktering bruker mikrofonen som er valgt da.
 
-Nedlastede modeller og innstillinger beholdes.
+Nedlastede modeller, innstillinger og tidligere økter beholdes.
