@@ -69,6 +69,8 @@ final class SessionController: ObservableObject {
         }
     }
     private var session: SpeechSession?
+    private let history = SessionHistory.shared
+    private var entryID: UUID?
     private var operation: Task<Void, Never>?
     private var timeout: Task<Void, Never>?
     private let delivery = TextDelivery()
@@ -111,7 +113,14 @@ final class SessionController: ObservableObject {
         start(source: .file(url))
     }
 
-    private func start(source: AudioSource) {
+    // Runs an earlier session's recorded audio through the current engine as a
+    // new session, so the original text is never replaced.
+    func transcribe(_ entry: HistoryEntry) {
+        guard !isBusy, let url = history.audioURL(for: entry) else { return }
+        start(source: .file(url), retranscribing: entry.id)
+    }
+
+    private func start(source: AudioSource, retranscribing original: UUID? = nil) {
         text = ""
         audioLevel = 0
         progress = 0
@@ -122,6 +131,19 @@ final class SessionController: ObservableObject {
         panel.show()
         let session = SpeechSession(useNBWhisper: useNBWhisper)
         self.session = session
+        let origin: HistoryEntry.Source
+        var seconds: Double?
+        switch source {
+        case .microphone:
+            origin = .microphone
+        case .file(let url):
+            origin = original.map { .retranscription($0) } ?? .file(url.lastPathComponent)
+            seconds = try? AudioFileDecoder.duration(of: url)
+        }
+        let engine = useNBWhisper ? "NB-Whisper \(WhisperModels.shared.availableModel.title)" : "Mac-diktasjon"
+        let (entryID, archive) = history.begin(origin, engine: engine, locale: locale, seconds: seconds,
+                                               recordsAudio: !source.isFile)
+        self.entryID = entryID
         session.onLevel = { [weak self, weak session] level in
             guard let self, self.session === session, self.phase == .recording else { return }
             self.audioLevel = level
@@ -142,6 +164,7 @@ final class SessionController: ObservableObject {
             if let device {
                 AudioDevices.lastSymbol = device.symbol
                 AudioDevices.lastQuickUID = device.isBluetooth ? nil : device.uid
+                self.history.update(entryID, microphone: device.name)
             }
             if hearing {
                 self.hearing = true
@@ -153,10 +176,15 @@ final class SessionController: ObservableObject {
         session.onText = { [weak self, weak session] text in
             guard let self, self.session === session else { return }
             self.text = text
+            self.history.update(entryID, text: text)
         }
         session.onFailure = { [weak self, weak session] error in
             guard let self, self.session === session else { return }
             self.fail(error)
+        }
+        session.onInterrupted = { [weak self, weak session] error in
+            guard let self, self.session === session else { return }
+            self.interrupt(error)
         }
         session.onStatus = { [weak self, weak session] status in
             guard let self, self.session === session, [.recording, .finishing].contains(self.phase) else { return }
@@ -166,7 +194,7 @@ final class SessionController: ObservableObject {
         operation = Task { [weak self] in
             guard let self else { return }
             do {
-                try await session.start(source: source, locale: selectedLocale) { [weak self] status in
+                try await session.start(source: source, locale: selectedLocale, archive: archive) { [weak self] status in
                     guard let self, self.session === session, self.phase == .preparing else { return }
                     self.message = status
                 }
@@ -203,7 +231,18 @@ final class SessionController: ObservableObject {
         showBars = true
     }
 
-    private func stop(automaticallyPaste shouldPaste: Bool? = nil, showFileProgress: Bool = false) {
+    // The microphone stopped by itself. Finish and copy what was heard, but never
+    // paste: the user may still be talking, unaware that recording has stopped.
+    private func interrupt(_ error: Error) {
+        switch phase {
+        case .preparing: fail(error)
+        case .recording: stop(automaticallyPaste: false, interruption: error.localizedDescription)
+        default: break
+        }
+    }
+
+    private func stop(automaticallyPaste shouldPaste: Bool? = nil, showFileProgress: Bool = false,
+                      interruption: String? = nil) {
         guard let session else { return }
         phase = .finishing
         progress = 0
@@ -225,6 +264,7 @@ final class SessionController: ObservableObject {
         message = "Ferdigstiller …"
         delivery.captureTarget()
         let shouldPaste = shouldPaste ?? automaticallyPaste
+        let entryID = entryID
         let timeoutSeconds = session.finalizationTimeout
         timeout = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(timeoutSeconds)) } catch { return }
@@ -240,6 +280,10 @@ final class SessionController: ObservableObject {
                 self.progressTask?.cancel()
                 self.progress = 100
                 self.text = finalText
+                if let entryID {
+                    let status: HistoryEntry.Status = interruption == nil ? .done : .interrupted
+                    self.history.finish(entryID, text: finalText, status: status, note: interruption)
+                }
                 if finalText.isEmpty {
                     self.message = "Ingen tale oppfattet."
                     self.delivery.reset()
@@ -252,8 +296,15 @@ final class SessionController: ObservableObject {
                 }
                 await session.cancel()
                 self.session = nil
-                self.phase = .idle
-                self.panel.hide()
+                if let interruption {
+                    // Stay on screen so an unexpected stop is noticed.
+                    self.message = "\(interruption) \(self.message)"
+                    self.phase = .failed
+                    self.panel.show()
+                } else {
+                    self.phase = .idle
+                    self.panel.hide()
+                }
             } catch {
                 guard self.session === session, self.phase == .finishing else { return }
                 self.fail(error)
@@ -285,9 +336,11 @@ final class SessionController: ObservableObject {
         progressTask?.cancel()
         delivery.reset()
         message = "Avbryter …"
+        let entryID = entryID
         operation = Task { [weak self] in
             await session.cancel()
             guard let self, self.session === session else { return }
+            if let entryID { self.history.finish(entryID, text: self.text, status: .discarded) }
             self.session = nil
             self.text = ""
             self.phase = .idle
@@ -304,10 +357,15 @@ final class SessionController: ObservableObject {
         progressTask?.cancel()
         delivery.reset()
         message = error.localizedDescription
+        // The next dictation clears the text; keep it reachable through «Kopier siste tekst».
+        if !text.isEmpty { lastText = text }
         let session = session
+        let entryID = entryID
+        let note = message
         operation = Task { [weak self] in
             await session?.cancel()
             guard let self else { return }
+            if let entryID { self.history.finish(entryID, text: self.text, status: .failed, note: note) }
             self.session = nil
             self.phase = .failed
             self.panel.show()
@@ -327,8 +385,12 @@ final class SessionController: ObservableObject {
         operation?.cancel()
         timeout?.cancel()
         progressTask?.cancel()
+        let entryID = entryID
         Task {
             await session.cancel()
+            if let entryID {
+                history.finish(entryID, text: text, status: .unfinished, note: "Dikta ble avsluttet under økten.")
+            }
             NSApp.terminate(nil)
         }
     }

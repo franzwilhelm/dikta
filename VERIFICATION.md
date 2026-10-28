@@ -35,7 +35,9 @@ Disse punktene er ikke bekreftet gjennom bygg eller kildekodegjennomgang:
 - [ ] Hold modifikatortaster inne etter stopp: bare kopiering etter ventefristen.
 - [ ] Avslå mikrofontilgang: forklaring vises, intet opptak.
 - [ ] Slå av Tilgjengelighet: ferdig tekst kopieres med forklaring.
-- [ ] Koble fra/bytt mikrofon under opptak: opptak stopper, tilgjengelig tekst kan kopieres.
+- [ ] «Tidligere økter»: ny diktering vises mens den pågår, og blir stående etter stopp, avbryt og feil.
+- [ ] Avslutt Dikta med `kill -9` under opptak: økten vises som «Ikke fullført» ved neste start, og lydopptaket kan transkriberes på nytt.
+- [ ] Koble AirPods til og fra flere ganger under opptak, med både Mac-mikrofonen og AirPods valgt: ingen krasj, opptaket fortsetter, eller stopper med beskjed og kopiert tekst.
 - [ ] «Kopier siste tekst» virker etter en avbrutt eller feilet senere økt.
 - [ ] Panel vises over fullskjermsapper uten å ta tastaturfokus.
 

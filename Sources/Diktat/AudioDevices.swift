@@ -46,9 +46,13 @@ enum AudioDevices {
     // The chosen microphone when connected; nil means use the macOS input.
     static func chosen(from inputs: [InputDevice]) -> InputDevice? {
         let choice = choice
-        if choice == builtIn { return inputs.first { $0.transport == kAudioDeviceTransportTypeBuiltIn } }
+        if choice == builtIn { return builtInMicrophone(in: inputs) }
         if choice.isEmpty { return nil }
         return inputs.first { $0.uid == choice }
+    }
+
+    static func builtInMicrophone(in inputs: [InputDevice]) -> InputDevice? {
+        inputs.first { $0.transport == kAudioDeviceTransportTypeBuiltIn }
     }
 
     static var inputs: [InputDevice] {

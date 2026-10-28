@@ -4,12 +4,14 @@ import Foundation
 protocol DictationSession: AnyObject {
     var onText: ((String) -> Void)? { get set }
     var onFailure: ((Error) -> Void)? { get set }
+    // Audio capture stopped by itself; what was already heard can still be finished.
+    var onInterrupted: ((Error) -> Void)? { get set }
     var onStatus: ((String) -> Void)? { get set }
     var onLevel: ((Float) -> Void)? { get set }
     var onInput: ((InputDevice?, Bool) -> Void)? { get set }
     var processingProgress: Double { get }
     var finalizationTimeout: Double { get }
-    func start(source: AudioSource, locale: String, status: (String) -> Void) async throws
+    func start(source: AudioSource, locale: String, archive: AudioArchive?, status: (String) -> Void) async throws
     func finish() async throws -> String
     func cancel() async
 }
@@ -29,6 +31,10 @@ final class SpeechSession {
         get { backend.onFailure }
         set { backend.onFailure = newValue }
     }
+    var onInterrupted: ((Error) -> Void)? {
+        get { backend.onInterrupted }
+        set { backend.onInterrupted = newValue }
+    }
     var onStatus: ((String) -> Void)? {
         get { backend.onStatus }
         set { backend.onStatus = newValue }
@@ -43,8 +49,8 @@ final class SpeechSession {
     }
     var processingProgress: Double { backend.processingProgress }
     var finalizationTimeout: Double { backend.finalizationTimeout }
-    func start(source: AudioSource, locale: String, status: (String) -> Void) async throws {
-        try await backend.start(source: source, locale: locale, status: status)
+    func start(source: AudioSource, locale: String, archive: AudioArchive?, status: (String) -> Void) async throws {
+        try await backend.start(source: source, locale: locale, archive: archive, status: status)
     }
     func finish() async throws -> String { Vocabulary.format(try await backend.finish()) }
     func cancel() async { await backend.cancel() }
