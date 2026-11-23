@@ -25,7 +25,7 @@ struct WhatsNewRelease {
                 symbol: "camera.viewfinder",
                 tint: Color(red: 1.0, green: 0.23, blue: 0.19),
                 title: "Innebygd skjermbilde med kontekst",
-                detail: "Trykk hurtigtasten eller kamera-ikonet på opptakskapselen mens du dikterer. Marker et område — Dikta tegner en rød ramme og tar med området rundt."
+                detail: "Trykk hurtigtasten eller kamera-ikonet på opptakskapselen mens du dikterer. Klikk på et vindu for hele vinduet, eller dra over et område for rød ramme med kontekst rundt."
             ),
             WhatsNewFeature(
                 symbol: "text.insert",

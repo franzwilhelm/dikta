@@ -52,8 +52,10 @@ final class ScreenshotCapture {
         let screens = NSScreen.screens
         let pointer = NSEvent.mouseLocation
         let activeScreen = screens.first { $0.frame.contains(pointer) } ?? NSScreen.main
+        var windowsByDisplay: [CGDirectDisplayID: [CGRect]] = [:]
         let targets: [ScreenTarget] = screens.compactMap { screen in
             guard let id = Self.displayID(for: screen) else { return nil }
+            windowsByDisplay[id] = Self.visibleWindowRects(for: id)
             let scale = max(1, screen.backingScaleFactor)
             return ScreenTarget(
                 displayID: id,
@@ -62,6 +64,7 @@ final class ScreenshotCapture {
             )
         }
 
+        let capturedWindows = windowsByDisplay
         preparationTask = Task { [weak self] in
             guard let self else { return }
             let captured = await Self.captureAllScreens(targets: targets)
@@ -72,7 +75,7 @@ final class ScreenshotCapture {
             }
             var imagesByID: [CGDirectDisplayID: CGImage] = [:]
             for item in captured { imagesByID[item.displayID] = item.image }
-            self.presentOverlay(screens: screens, images: imagesByID, activeScreen: activeScreen)
+            self.presentOverlay(screens: screens, images: imagesByID, windows: capturedWindows, activeScreen: activeScreen)
         }
     }
 
@@ -81,7 +84,8 @@ final class ScreenshotCapture {
         finish(with: nil)
     }
 
-    private func presentOverlay(screens: [NSScreen], images: [CGDirectDisplayID: CGImage], activeScreen: NSScreen?) {
+    private func presentOverlay(screens: [NSScreen], images: [CGDirectDisplayID: CGImage],
+                                windows: [CGDirectDisplayID: [CGRect]], activeScreen: NSScreen?) {
         installEscapeMonitors()
         if !cursorPushed {
             NSCursor.crosshair.push()
@@ -89,6 +93,7 @@ final class ScreenshotCapture {
         }
 
         let level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)))
+        let pointer = NSEvent.mouseLocation
         for screen in screens {
             guard let displayID = Self.displayID(for: screen), let image = images[displayID] else { continue }
             let panel = CapturePanel(
@@ -108,16 +113,34 @@ final class ScreenshotCapture {
             panel.setFrame(screen.frame, display: true)
 
             let showHint = activeScreen.map { Self.displayID(for: $0) == displayID } ?? false
+            var initialHover: NSPoint?
+            if screen.frame.contains(pointer) {
+                initialHover = NSPoint(
+                    x: pointer.x - screen.frame.minX,
+                    y: screen.frame.maxY - pointer.y
+                )
+            }
             let view = CaptureSelectionView(
                 frame: NSRect(origin: .zero, size: screen.frame.size),
                 image: image,
+                windowRects: windows[displayID] ?? [],
+                initialHover: initialHover,
                 showHint: showHint,
-                onComplete: { [weak self] selection in
+                onCompleteRegion: { [weak self] selection in
                     guard let self else { return }
                     let data = Self.renderAnnotatedCrop(
                         fullImage: image,
                         screenSize: screen.frame.size,
                         selection: selection
+                    )
+                    self.finish(with: data)
+                },
+                onCompleteWindow: { [weak self] windowRect in
+                    guard let self else { return }
+                    let data = Self.renderWindowCrop(
+                        fullImage: image,
+                        screenSize: screen.frame.size,
+                        rect: windowRect
                     )
                     self.finish(with: data)
                 },
@@ -175,6 +198,38 @@ final class ScreenshotCapture {
 
     private static func displayID(for screen: NSScreen) -> CGDirectDisplayID? {
         screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    }
+
+    // Returns visible app window rects in top-left display-local points, front-to-back.
+    private static func visibleWindowRects(for displayID: CGDirectDisplayID) -> [CGRect] {
+        let displayBounds = CGDisplayBounds(displayID)
+        guard displayBounds.width > 0, displayBounds.height > 0 else { return [] }
+        guard let list = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return []
+        }
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let localScreen = CGRect(origin: .zero, size: displayBounds.size)
+        var rects: [CGRect] = []
+        for info in list {
+            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+            if let pid = info[kCGWindowOwnerPID as String] as? pid_t, pid == ownPID { continue }
+            if let alpha = info[kCGWindowAlpha as String] as? Double, alpha <= 0.01 { continue }
+            guard let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let cgRect = CGRect(dictionaryRepresentation: boundsDict) else { continue }
+            let local = CGRect(
+                x: cgRect.minX - displayBounds.minX,
+                y: cgRect.minY - displayBounds.minY,
+                width: cgRect.width,
+                height: cgRect.height
+            ).intersection(localScreen)
+            if local.width >= 40, local.height >= 40 {
+                rects.append(local)
+            }
+        }
+        return rects
     }
 
     private nonisolated static func captureAllScreens(targets: [ScreenTarget]) async -> [FrozenScreen] {
@@ -285,24 +340,54 @@ final class ScreenshotCapture {
         let rep = NSBitmapImageRep(cgImage: annotated)
         return rep.representation(using: .png, properties: [:])
     }
+
+    static func renderWindowCrop(fullImage: CGImage, screenSize: CGSize, rect: CGRect) -> Data? {
+        guard screenSize.width > 0, screenSize.height > 0 else { return nil }
+        let screenBounds = CGRect(origin: .zero, size: screenSize)
+        let clamped = rect.intersection(screenBounds)
+        guard clamped.width >= 4, clamped.height >= 4 else { return nil }
+
+        let scaleX = CGFloat(fullImage.width) / screenSize.width
+        let scaleY = CGFloat(fullImage.height) / screenSize.height
+        let imageBounds = CGRect(x: 0, y: 0, width: fullImage.width, height: fullImage.height)
+        let cropPixels = CGRect(
+            x: clamped.minX * scaleX,
+            y: clamped.minY * scaleY,
+            width: clamped.width * scaleX,
+            height: clamped.height * scaleY
+        ).integral.intersection(imageBounds)
+
+        guard cropPixels.width >= 4, cropPixels.height >= 4,
+              let cropped = fullImage.cropping(to: cropPixels) else { return nil }
+
+        let rep = NSBitmapImageRep(cgImage: cropped)
+        return rep.representation(using: .png, properties: [:])
+    }
 }
 
 private final class CaptureSelectionView: NSView {
     private let backgroundImage: NSImage
+    private let windowRects: [CGRect]
     private let showHint: Bool
-    private let onComplete: (CGRect) -> Void
+    private let onCompleteRegion: (CGRect) -> Void
+    private let onCompleteWindow: (CGRect) -> Void
     private let onCancel: () -> Void
+    private var hoverPoint: NSPoint?
     private var dragStart: NSPoint?
     private var dragCurrent: NSPoint?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
-    init(frame: NSRect, image: CGImage, showHint: Bool,
-         onComplete: @escaping (CGRect) -> Void, onCancel: @escaping () -> Void) {
+    init(frame: NSRect, image: CGImage, windowRects: [CGRect], initialHover: NSPoint?, showHint: Bool,
+         onCompleteRegion: @escaping (CGRect) -> Void, onCompleteWindow: @escaping (CGRect) -> Void,
+         onCancel: @escaping () -> Void) {
         self.backgroundImage = NSImage(cgImage: image, size: frame.size)
+        self.windowRects = windowRects
+        self.hoverPoint = initialHover
         self.showHint = showHint
-        self.onComplete = onComplete
+        self.onCompleteRegion = onCompleteRegion
+        self.onCompleteWindow = onCompleteWindow
         self.onCancel = onCancel
         super.init(frame: frame)
     }
@@ -325,10 +410,27 @@ private final class CaptureSelectionView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         NSCursor.crosshair.set()
+        updateHover(with: event)
     }
 
     override func mouseMoved(with event: NSEvent) {
         NSCursor.crosshair.set()
+        updateHover(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard dragStart == nil else { return }
+        hoverPoint = nil
+        needsDisplay = true
+    }
+
+    private func updateHover(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let previousWindow = hoveredWindow
+        hoverPoint = point
+        if hoveredWindow != previousWindow {
+            needsDisplay = true
+        }
     }
 
     override func resetCursorRects() {
@@ -349,6 +451,7 @@ private final class CaptureSelectionView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        hoverPoint = point
         dragStart = point
         dragCurrent = point
         needsDisplay = true
@@ -360,15 +463,26 @@ private final class CaptureSelectionView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        dragCurrent = convert(event.locationInWindow, from: nil)
+        let point = convert(event.locationInWindow, from: nil)
+        dragCurrent = point
         let selection = currentSelection
         dragStart = nil
         dragCurrent = nil
         if let selection, selection.width >= 8, selection.height >= 8 {
-            onComplete(selection)
+            onCompleteRegion(selection)
         } else {
-            onCancel()
+            let target = windowUnder(point) ?? bounds
+            onCompleteWindow(target)
         }
+    }
+
+    private func windowUnder(_ point: NSPoint) -> CGRect? {
+        windowRects.first { $0.contains(point) }
+    }
+
+    private var hoveredWindow: CGRect? {
+        guard let hoverPoint else { return nil }
+        return windowUnder(hoverPoint)
     }
 
     private var currentSelection: CGRect? {
@@ -408,6 +522,22 @@ private final class CaptureSelectionView: NSView {
             boxPath.lineWidth = 3
             NSColor(srgbRed: 1.0, green: 0.23, blue: 0.19, alpha: 1.0).setStroke()
             boxPath.stroke()
+        } else if let hovered = hoveredWindow {
+            // Spotlight the window under the pointer so single-click capture is obvious.
+            let dimPath = NSBezierPath(rect: bounds)
+            dimPath.appendRect(hovered)
+            dimPath.windingRule = .evenOdd
+            NSColor.black.withAlphaComponent(0.30).setFill()
+            dimPath.fill()
+
+            let outline = NSBezierPath(roundedRect: hovered.insetBy(dx: 1.5, dy: 1.5), xRadius: 8, yRadius: 8)
+            outline.lineWidth = 2.5
+            NSColor.white.withAlphaComponent(0.85).setStroke()
+            outline.stroke()
+
+            if showHint {
+                drawHintPill()
+            }
         } else {
             NSColor.black.withAlphaComponent(0.22).setFill()
             bounds.fill()
@@ -418,7 +548,7 @@ private final class CaptureSelectionView: NSView {
     }
 
     private func drawHintPill() {
-        let text = "Dra for å markere område · Esc for å avbryte"
+        let text = "Klikk for hele vinduet · Dra for område · Esc for å avbryte"
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 13, weight: .medium),
             .foregroundColor: NSColor.white

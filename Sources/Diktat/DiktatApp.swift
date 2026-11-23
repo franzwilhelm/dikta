@@ -292,7 +292,7 @@ private struct SettingsView: View {
                 KeyboardShortcuts.Recorder("Start / stopp", name: .toggleDictation)
                 KeyboardShortcuts.Recorder("Avbryt", name: .cancelDictation)
                 KeyboardShortcuts.Recorder("Ta skjermbilde", name: .captureScreenshot)
-                Text("Skjermbilde-hurtigtasten er aktiv mens du dikterer. Marker et område, så legger Dikta til en rød ramme med kontekst rundt og setter bildet inn der du var i diktatet.")
+                Text("Skjermbilde-hurtigtasten er aktiv mens du dikterer. Klikk på et vindu for å ta hele vinduet, eller dra over et område for rød ramme med kontekst rundt.")
                     .font(.caption).foregroundStyle(.secondary)
             }.disabled(controller.isBusy)
             Section("Tilganger") {
