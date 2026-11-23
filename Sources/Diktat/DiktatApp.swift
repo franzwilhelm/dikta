@@ -8,8 +8,14 @@ import Sparkle
 @main
 struct DiktatApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @StateObject private var controller = SessionController()
+    @StateObject private var controller: SessionController
     @ObservedObject private var whisper = NBWhisper.shared
+
+    init() {
+        let controller = SessionController()
+        _controller = StateObject(wrappedValue: controller)
+        AppDelegate.startupController = controller
+    }
 
     private var warmingUp: Bool { controller.useNBWhisper && whisper.isLoading && !controller.isBusy }
 
@@ -18,6 +24,9 @@ struct DiktatApp: App {
             Text(warmingUp ? "Gjør klar …" : controller.message)
             Button(controller.phase == .recording ? "Stopp diktasjon" : "Start diktasjon") { controller.toggle() }
                 .disabled(!controller.canToggle)
+            if controller.canCaptureScreenshot {
+                Button("Ta skjermbilde") { controller.captureScreenshot() }
+            }
             Button("Avbryt diktasjon") { controller.cancel() }.disabled(!controller.canCancel)
             Button("Transkriber lydfil …") { controller.transcribeFile() }.disabled(controller.isBusy)
             Divider()
@@ -40,6 +49,7 @@ struct DiktatApp: App {
             }
             Divider()
             Button("Innstillinger …") { delegate.showSettings(controller: controller) }
+            Button("Hva er nytt …") { delegate.showWhatsNew(controller: controller) }
             Button("Se etter oppdateringer …") { delegate.checkForUpdates() }
                 .disabled(!delegate.canCheckForUpdates)
             Button("Avslutt Dikta") { controller.quit() }
@@ -50,10 +60,7 @@ struct DiktatApp: App {
                 .animation(.easeInOut(duration: 0.6), value: warmingUp)
                 .accessibilityLabel(warmingUp ? "Dikta gjør klar" : "Dikta: \(controller.message)")
                 .onAppear {
-                    if !UserDefaults.standard.bool(forKey: "hasOpenedSettings") {
-                        UserDefaults.standard.set(true, forKey: "hasOpenedSettings")
-                        delegate.showSettings(controller: controller)
-                    }
+                    delegate.registerStartup(controller: controller)
                     controller.checkStartupAccess()
                 }
         }
@@ -61,9 +68,13 @@ struct DiktatApp: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, ObservableObject {
+    static weak var startupController: SessionController?
     private var settingsWindow: NSWindow?
     private var historyWindow: NSWindow?
+    private var whatsNewWindow: NSWindow?
+    private var didFinishLaunching = false
+    private var didRunStartupPresentation = false
     // Sparkle reads SUFeedURL and SUPublicEDKey from Info.plist and checks in the background.
     private let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
     @Published private(set) var canCheckForUpdates = false
@@ -96,23 +107,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        didFinishLaunching = true
+        runStartupPresentationIfReady()
+    }
+
+    func registerStartup(controller: SessionController) {
+        Self.startupController = controller
+        runStartupPresentationIfReady()
+    }
+
+    private func runStartupPresentationIfReady() {
+        guard didFinishLaunching, !didRunStartupPresentation, let controller = Self.startupController else { return }
+        didRunStartupPresentation = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self, weak controller] in
+            guard let self, let controller else { return }
+            if !UserDefaults.standard.bool(forKey: "hasOpenedSettings") {
+                UserDefaults.standard.set(true, forKey: "hasOpenedSettings")
+                WhatsNewRelease.markSeen()
+                self.showSettings(controller: controller)
+            } else if WhatsNewRelease.shouldPresentOnUpgrade {
+                self.showWhatsNew(controller: controller)
+            }
+            controller.checkStartupAccess()
+        }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if let window = notification.object as? NSWindow, window === whatsNewWindow {
+            WhatsNewRelease.markSeen()
+        }
+    }
+
+    private func present(_ window: NSWindow, centerOnActiveScreen: Bool = false) {
+        window.collectionBehavior.insert(.moveToActiveSpace)
+        if centerOnActiveScreen {
+            let pointer = NSEvent.mouseLocation
+            let screen = NSScreen.screens.first { $0.frame.contains(pointer) } ?? NSScreen.main
+            if let frame = screen?.visibleFrame {
+                let origin = NSPoint(
+                    x: frame.midX - window.frame.width / 2,
+                    y: frame.midY - window.frame.height / 2
+                )
+                window.setFrameOrigin(origin)
+            }
+        }
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     func showSettings(controller: SessionController) {
+        let isNew = settingsWindow == nil
         if settingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 720),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Dikta – innstillinger"
             window.isReleasedWhenClosed = false
             window.contentView = NSHostingView(rootView: SettingsView(controller: controller))
-            window.center()
             settingsWindow = window
         }
-        NSApp.activate()
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        if let settingsWindow {
+            present(settingsWindow, centerOnActiveScreen: isNew)
+        }
     }
 
     func showHistory(controller: SessionController) {
+        let isNew = historyWindow == nil
         if historyWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 580),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -121,12 +181,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             window.isReleasedWhenClosed = false
             window.contentMinSize = NSSize(width: 720, height: 440)
             window.contentView = NSHostingView(rootView: HistoryView(history: .shared, controller: controller))
-            window.center()
             window.setFrameAutosaveName("DiktaHistory")
             historyWindow = window
         }
-        NSApp.activate()
-        historyWindow?.makeKeyAndOrderFront(nil)
+        if let historyWindow {
+            present(historyWindow, centerOnActiveScreen: isNew && !historyWindow.setFrameUsingName("DiktaHistory"))
+        }
+    }
+
+    func showWhatsNew(controller: SessionController) {
+        if whatsNewWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 495),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "Nytt i Dikta"
+            window.isReleasedWhenClosed = false
+            window.delegate = self
+            window.contentView = NSHostingView(rootView: WhatsNewView(
+                controller: controller,
+                onOpenSettings: { [weak self] in
+                    WhatsNewRelease.markSeen()
+                    self?.whatsNewWindow?.close()
+                    self?.showSettings(controller: controller)
+                },
+                onClose: { [weak self] in
+                    WhatsNewRelease.markSeen()
+                    self?.whatsNewWindow?.close()
+                }
+            ))
+            whatsNewWindow = window
+        }
+        if let whatsNewWindow {
+            present(whatsNewWindow, centerOnActiveScreen: true)
+        }
     }
 }
 
@@ -205,6 +291,9 @@ private struct SettingsView: View {
             Section("Hurtigtaster") {
                 KeyboardShortcuts.Recorder("Start / stopp", name: .toggleDictation)
                 KeyboardShortcuts.Recorder("Avbryt", name: .cancelDictation)
+                KeyboardShortcuts.Recorder("Ta skjermbilde", name: .captureScreenshot)
+                Text("Skjermbilde-hurtigtasten er aktiv mens du dikterer. Marker et område, så legger Dikta til en rød ramme med kontekst rundt og setter bildet inn der du var i diktatet.")
+                    .font(.caption).foregroundStyle(.secondary)
             }.disabled(controller.isBusy)
             Section("Tilganger") {
                 Button("Gi mikrofontilgang") {
@@ -223,6 +312,17 @@ private struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Åpne Tilgjengelighet …") {
                         controller.requestAutomaticPasteAccess()
+                    }
+                }
+                Label(
+                    controller.screenCaptureGranted ? "Skjermbilder har tilgang" : "Skjermbilder mangler tilgang",
+                    systemImage: controller.screenCaptureGranted ? "checkmark.circle.fill" : "exclamationmark.triangle"
+                )
+                if !controller.screenCaptureGranted {
+                    Text("Slå på Dikta i Systeminnstillinger → Personvern og sikkerhet → Skjerm- og systemlydopptak for å ta skjermbilder under diktasjon.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Åpne Skjermopptak …") {
+                        controller.requestScreenCaptureAccess()
                     }
                 }
                 if !permissionMessage.isEmpty { Text(permissionMessage).font(.caption) }

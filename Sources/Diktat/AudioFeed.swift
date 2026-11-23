@@ -37,8 +37,15 @@ final class AudioFeed: @unchecked Sendable {
     private let consume: @Sendable (AVAudioPCMBuffer) throws -> Void
     private let end: @Sendable (Error?) -> Void
     private var ended = false
+    private var outputFrames: Int64 = 0
     private var meterSeconds = 0.0
     private let level: @Sendable (Float) -> Void
+
+    var recordedSeconds: Double {
+        lock.lock()
+        defer { lock.unlock() }
+        return format.sampleRate > 0 ? Double(outputFrames) / format.sampleRate : 0
+    }
 
     init(input: AVAudioFormat, output: AVAudioFormat,
          level: @escaping @Sendable (Float) -> Void = { _ in },
@@ -96,6 +103,7 @@ final class AudioFeed: @unchecked Sendable {
             return
         }
         if output.frameLength > 0 {
+            outputFrames += Int64(output.frameLength)
             do { try consume(output) }
             catch { fail(error) }
         }
@@ -122,6 +130,7 @@ final class AudioFeed: @unchecked Sendable {
                 return
             }
             if output.frameLength > 0 {
+                outputFrames += Int64(output.frameLength)
                 do { try consume(output) }
                 catch { fail(error); return }
             }

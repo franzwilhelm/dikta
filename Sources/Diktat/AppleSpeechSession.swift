@@ -22,6 +22,8 @@ final class AppleSpeechSession: DictationSession {
     var processingProgress: Double { 0 } // Apple exposes no finalization progress.
     private var fileSeconds = 0.0
     var finalizationTimeout: Double { max(30, fileSeconds * 2) }
+    var audioSeconds: Double { feed?.recordedSeconds ?? 0 }
+    var timedPieces: [TimedPiece] { buffer.timedPieces }
 
     func start(source: AudioSource, locale identifier: String, archive: AudioArchive?,
                status: (String) -> Void) async throws {
@@ -35,7 +37,9 @@ final class AppleSpeechSession: DictationSession {
             throw DiktatError(message: "Dette språket støttes ikke av Apples lokale diktasjon.")
         }
         try checkCancellation()
-        let transcriber = DictationTranscriber(locale: locale, preset: .progressiveLongDictation)
+        var preset = DictationTranscriber.Preset.progressiveLongDictation
+        preset.attributeOptions.insert(.audioTimeRange)
+        let transcriber = DictationTranscriber(locale: locale, preset: preset)
         try await AssetInventory.reserve(locale: locale)
         try checkCancellation()
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {

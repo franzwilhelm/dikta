@@ -25,6 +25,36 @@ struct HistoryEntry: Codable, Identifiable, Hashable {
     var status = Status.active
     var note: String?
     var audio: String?
+    var screenshots: [SessionScreenshot] = []
+
+    enum CodingKeys: String, CodingKey {
+        case id, startedAt, source, engine, locale, seconds, microphone, text, original, status, note, audio, screenshots
+    }
+
+    init(id: UUID, startedAt: Date, source: Source, engine: String, locale: String) {
+        self.id = id
+        self.startedAt = startedAt
+        self.source = source
+        self.engine = engine
+        self.locale = locale
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        source = try container.decode(Source.self, forKey: .source)
+        engine = try container.decode(String.self, forKey: .engine)
+        locale = try container.decode(String.self, forKey: .locale)
+        seconds = try container.decodeIfPresent(Double.self, forKey: .seconds)
+        microphone = try container.decodeIfPresent(String.self, forKey: .microphone)
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        original = try container.decodeIfPresent(String.self, forKey: .original)
+        status = try container.decodeIfPresent(Status.self, forKey: .status) ?? .done
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+        audio = try container.decodeIfPresent(String.self, forKey: .audio)
+        screenshots = try container.decodeIfPresent([SessionScreenshot].self, forKey: .screenshots) ?? []
+    }
 }
 
 // Every dictation and file transcription, with its text and microphone audio,
@@ -63,6 +93,55 @@ final class SessionHistory: ObservableObject {
         guard let audio = entry.audio else { return nil }
         let url = folder(for: entry.id).appendingPathComponent(audio)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func screenshotURL(for entryID: UUID, screenshot: SessionScreenshot) -> URL? {
+        let url = folder(for: entryID).appendingPathComponent(screenshot.filename)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    func addScreenshot(_ id: UUID, data: Data, timestamp: Double) -> SessionScreenshot? {
+        guard let index = index(of: id) else { return nil }
+        let number = entries[index].screenshots.count + 1
+        let filename = "screenshot-\(number).png"
+        let sessionFolder = folder(for: id)
+        let target = sessionFolder.appendingPathComponent(filename)
+        do {
+            try FileManager.default.createDirectory(at: sessionFolder, withIntermediateDirectories: true)
+            try data.write(to: target, options: .atomic)
+        } catch {
+            return nil
+        }
+        let screenshot = SessionScreenshot(id: UUID(), filename: filename, timestamp: max(0, timestamp))
+        entries[index].screenshots.append(screenshot)
+        save(entries[index])
+        return screenshot
+    }
+
+    func copyScreenshots(from sourceID: UUID, to targetID: UUID) -> [SessionScreenshot] {
+        guard let sourceIndex = index(of: sourceID),
+              let targetIndex = index(of: targetID) else { return [] }
+        let sourceShots = entries[sourceIndex].screenshots
+        guard !sourceShots.isEmpty else { return [] }
+        let sourceFolder = folder(for: sourceID)
+        let targetFolder = folder(for: targetID)
+        try? FileManager.default.createDirectory(at: targetFolder, withIntermediateDirectories: true)
+        var copied: [SessionScreenshot] = []
+        for shot in sourceShots {
+            let from = sourceFolder.appendingPathComponent(shot.filename)
+            let to = targetFolder.appendingPathComponent(shot.filename)
+            guard FileManager.default.fileExists(atPath: from.path) else { continue }
+            try? FileManager.default.removeItem(at: to)
+            do {
+                try FileManager.default.copyItem(at: from, to: to)
+                copied.append(SessionScreenshot(id: UUID(), filename: shot.filename, timestamp: shot.timestamp))
+            } catch {}
+        }
+        if !copied.isEmpty {
+            entries[targetIndex].screenshots = copied
+            save(entries[targetIndex])
+        }
+        return copied
     }
 
     func begin(_ source: HistoryEntry.Source, engine: String, locale: String, seconds: Double?,
@@ -108,8 +187,8 @@ final class SessionHistory: ObservableObject {
         entry.note = note
         if let recorded { entry.seconds = recorded }
         if recorded == 0 { entry.audio = nil }
-        // A tap on the hotkey with nothing said is not worth keeping.
-        if text.isEmpty && (entry.seconds ?? 0) < 2 {
+        // A tap on the hotkey with nothing said and no screenshots is not worth keeping.
+        if text.isEmpty && entry.screenshots.isEmpty && (entry.seconds ?? 0) < 2 {
             delete(id)
             return
         }

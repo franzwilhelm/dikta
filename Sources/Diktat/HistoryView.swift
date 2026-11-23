@@ -125,6 +125,15 @@ private struct HistoryRow: View {
                 if let seconds = entry.seconds {
                     Text(HistoryFormat.duration(seconds)).font(.subheadline).foregroundStyle(.secondary)
                 }
+                if !entry.screenshots.isEmpty {
+                    HStack(spacing: 2) {
+                        Image(systemName: "camera")
+                        Text("\(entry.screenshots.count)")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help(entry.screenshots.count == 1 ? "1 skjermbilde" : "\(entry.screenshots.count) skjermbilder")
+                }
                 Spacer(minLength: 4)
                 if let badge = HistoryFormat.badge(entry) {
                     Image(systemName: badge.symbol)
@@ -206,14 +215,39 @@ private struct HistoryDetail: View {
             }
             Divider()
             ScrollView {
-                Text(shownText.isEmpty ? "Ingen tekst." : shownText)
-                    .font(.system(size: 15))
-                    .lineSpacing(4)
-                    .foregroundStyle(shownText.isEmpty ? .secondary : .primary)
-                    .textSelection(.enabled)
+                if entry.screenshots.isEmpty {
+                    Text(shownText.isEmpty ? "Ingen tekst." : shownText)
+                        .font(.system(size: 15))
+                        .lineSpacing(4)
+                        .foregroundStyle(shownText.isEmpty ? .secondary : .primary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: 680, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(24)
+                } else {
+                    let blocks = TranscriptComposer.parseDisplayBlocks(
+                        text: shownText,
+                        screenshots: entry.screenshots,
+                        folder: history.folder(for: entry.id)
+                    )
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(blocks) { block in
+                            switch block {
+                            case .text(_, let content):
+                                Text(content)
+                                    .font(.system(size: 15))
+                                    .lineSpacing(4)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: 680, alignment: .leading)
+                            case .screenshot(_, let number, let url, _):
+                                HistoryScreenshotCard(number: number, url: url)
+                            }
+                        }
+                    }
                     .frame(maxWidth: 680, alignment: .leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(24)
+                }
             }
         }
         .confirmationDialog("Slette økten?", isPresented: $confirmingDelete) {
@@ -277,6 +311,66 @@ private struct HistoryDetail: View {
         Task {
             try? await Task.sleep(for: .seconds(1.5))
             copied = false
+        }
+    }
+}
+
+private struct HistoryScreenshotCard: View {
+    let number: Int
+    let url: URL
+    @State private var copiedImage = false
+
+    private var image: NSImage? {
+        NSImage(contentsOf: url)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let image {
+                Button { NSWorkspace.shared.open(url) } label: {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: 520, maxHeight: 320, alignment: .leading)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(.quaternary, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Åpne skjermbilde \(number)")
+            }
+            HStack(spacing: 10) {
+                Text("Skjermbilde \(number)")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button { copyImage() } label: {
+                    Label(copiedImage ? "Kopiert" : "Kopier bilde", systemImage: copiedImage ? "checkmark" : "photo.on.rectangle")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: {
+                    Label("Vis i Finder", systemImage: "folder")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+            }
+            .frame(maxWidth: 520)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.45)))
+    }
+
+    private func copyImage() {
+        guard let image else { return }
+        NSPasteboard.general.clearContents()
+        guard NSPasteboard.general.writeObjects([image]) else { return }
+        copiedImage = true
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            copiedImage = false
         }
     }
 }

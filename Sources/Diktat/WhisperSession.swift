@@ -64,21 +64,38 @@ final class WhisperChunks: @unchecked Sendable {
 }
 
 struct WhisperTranscript {
-    private var words: [String] = []
-    var text: String { words.joined(separator: " ") }
+    private(set) var pieces: [TimedPiece] = []
+    var text: String { TranscriptComposer.join(pieces) }
 
     mutating func append(_ incoming: [WhisperWord], chunk: WhisperChunk) {
-        let next = incoming.flatMap { $0.text.split(whereSeparator: \.isWhitespace).map(String.init) }
+        var next: [TimedPiece] = []
+        for word in incoming {
+            let tokens = word.text.split(whereSeparator: \.isWhitespace).map(String.init)
+            guard !tokens.isEmpty else { continue }
+            let wordStart = chunk.start + max(0, word.start)
+            let wordEnd = max(wordStart, chunk.start + max(0, word.end))
+            if tokens.count == 1 {
+                next.append(TimedPiece(text: tokens[0], start: wordStart, end: wordEnd))
+            } else {
+                let duration = wordEnd - wordStart
+                let step = duration / Double(tokens.count)
+                for (index, token) in tokens.enumerated() {
+                    let start = wordStart + Double(index) * step
+                    let end = start + step
+                    next.append(TimedPiece(text: token, start: start, end: end))
+                }
+            }
+        }
         guard !next.isEmpty else { return }
         var overlap = 0
         // VAD timestamps near pauses are not reliable enough to delete words.
         // Remove only text actually repeated across the overlapping audio.
         if chunk.start > 0 {
-            let limit = min(20, words.count, next.count)
+            let limit = min(20, pieces.count, next.count)
             if limit > 0 {
                 for count in stride(from: limit, through: 1, by: -1) {
-                    let previous = words.suffix(count).map(Self.normalized)
-                    let following = next.prefix(count).map(Self.normalized)
+                    let previous = pieces.suffix(count).map { Self.normalized($0.text) }
+                    let following = next.prefix(count).map { Self.normalized($0.text) }
                     if previous == following, previous.contains(where: { !$0.isEmpty }) {
                         overlap = count
                         break
@@ -86,7 +103,7 @@ struct WhisperTranscript {
                 }
             }
         }
-        words.append(contentsOf: next.dropFirst(overlap))
+        pieces.append(contentsOf: next.dropFirst(overlap))
     }
 
     private static func normalized(_ word: String) -> String {
@@ -133,6 +150,8 @@ final class WhisperSession: DictationSession {
         let audioSeconds = Double(totalSamples) / 16_000
         return isFile ? max(180 * 10, audioSeconds * 3) : 180 * 10
     }
+    var audioSeconds: Double { feed?.recordedSeconds ?? 0 }
+    var timedPieces: [TimedPiece] { transcript.pieces }
 
     func start(source: AudioSource, locale: String, archive: AudioArchive?, status: (String) -> Void) async throws {
         guard let output = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000,

@@ -45,7 +45,7 @@ final class RecordingPanel {
     private var size: NSSize {
         if controller?.phase == .failed { return NSSize(width: 360, height: 160) }
         if controller?.confirmingDiscard == true { return NSSize(width: 360, height: 64) }
-        return NSSize(width: 200, height: 64)
+        return NSSize(width: 244, height: 64)
     }
 
     // Resize in place, keeping the panel centred where the user left it.
@@ -144,7 +144,7 @@ private struct RecordingView: View {
             }
         }
         .padding(.vertical, 12)
-        .padding(.horizontal, controller.confirmingDiscard ? 24 : 40)
+        .padding(.horizontal, controller.confirmingDiscard ? 24 : 52)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.easeInOut(duration: 0.2), value: controller.confirmingDiscard)
         .animation(.easeInOut(duration: 0.25), value: controller.buttonsVisible)
@@ -158,9 +158,16 @@ private struct RecordingView: View {
         }
         .overlay(alignment: .trailing) {
             if controller.phase == .recording && !controller.confirmingDiscard && controller.buttonsVisible {
-                PanelButton(symbol: "stop.fill", label: "Stopp og sett inn tekst") { controller.toggle() }
-                    .help("Stopp og sett inn tekst")
-                    .padding(.trailing, 10)
+                HStack(spacing: 4) {
+                    if controller.canCaptureScreenshot {
+                        ScreenshotButton(count: controller.screenshotCount, flash: controller.screenshotFlash) {
+                            controller.captureScreenshot()
+                        }
+                    }
+                    PanelButton(symbol: "stop.fill", label: "Stopp og sett inn tekst") { controller.toggle() }
+                        .help("Stopp og sett inn tekst")
+                }
+                .padding(.trailing, 10)
             }
         }
         .foregroundStyle(.white)
@@ -192,6 +199,50 @@ private struct PanelButton: View {
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hovering)
         .accessibilityLabel(label)
+    }
+}
+
+private struct ScreenshotButton: View {
+    let count: Int
+    let flash: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    private var helpText: String {
+        if count > 0 { return "Ta skjermbilde (\(count) tatt)" }
+        return "Ta skjermbilde"
+    }
+
+    private var badgeFill: Color {
+        flash ? Color.green : Color(red: 1.0, green: 0.23, blue: 0.19)
+    }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: flash ? "checkmark" : "camera.viewfinder")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(flash ? Color.green : Color.white)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(.white.opacity(hovering ? 0.2 : 0)))
+                    .contentShape(Circle())
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .frame(minWidth: 15, minHeight: 15)
+                        .background(Capsule().fill(badgeFill))
+                        .offset(x: 2, y: -1)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.15), value: hovering)
+        .animation(.easeInOut(duration: 0.2), value: flash)
+        .help(helpText)
+        .accessibilityLabel(helpText)
     }
 }
 

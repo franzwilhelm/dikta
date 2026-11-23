@@ -19,11 +19,16 @@ SHA="$(shasum -a 256 "$OUT/$ARCHIVE" | awk '{print $1}')"
 } > "$OUT/install.sh"
 chmod +x "$OUT/install.sh"
 # Sparkle appcast: the EdDSA private key lives in the release machine's keychain (generate_keys).
+NOTES_FILE="$OUT/${ARCHIVE%.zip}.md"
+if [ -f "$PROJECT_DIR/RELEASE_NOTES.md" ]; then
+    cp "$PROJECT_DIR/RELEASE_NOTES.md" "$NOTES_FILE"
+fi
 "$PROJECT_DIR/.build/artifacts/sparkle/Sparkle/bin/generate_appcast" \
+    --embed-release-notes \
     --download-url-prefix "$BASE_URL/" \
     --link "https://github.com/$REPOSITORY/releases/tag/v$VERSION" \
     --maximum-versions 1 -o "$OUT/appcast.xml" "$OUT"
-rm -f "$OUT/$ARCHIVE".delta "$OUT"/*.delta
+rm -f "$NOTES_FILE" "$OUT/$ARCHIVE".delta "$OUT"/*.delta
 (cd "$OUT" && shasum -a 256 "$ARCHIVE" install.sh appcast.xml > SHA256SUMS)
 bash -n "$OUT/install.sh"
 printf 'Release klar: %s\n' "$OUT"

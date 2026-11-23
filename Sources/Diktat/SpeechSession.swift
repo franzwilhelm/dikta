@@ -11,6 +11,8 @@ protocol DictationSession: AnyObject {
     var onInput: ((InputDevice?, Bool) -> Void)? { get set }
     var processingProgress: Double { get }
     var finalizationTimeout: Double { get }
+    var audioSeconds: Double { get }
+    var timedPieces: [TimedPiece] { get }
     func start(source: AudioSource, locale: String, archive: AudioArchive?, status: (String) -> Void) async throws
     func finish() async throws -> String
     func cancel() async
@@ -49,6 +51,8 @@ final class SpeechSession {
     }
     var processingProgress: Double { backend.processingProgress }
     var finalizationTimeout: Double { backend.finalizationTimeout }
+    var audioSeconds: Double { backend.audioSeconds }
+    var timedPieces: [TimedPiece] { backend.timedPieces }
     func start(source: AudioSource, locale: String, archive: AudioArchive?, status: (String) -> Void) async throws {
         try await backend.start(source: source, locale: locale, archive: archive, status: status)
     }

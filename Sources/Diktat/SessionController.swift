@@ -6,6 +6,7 @@ import KeyboardShortcuts
 extension KeyboardShortcuts.Name {
     static let toggleDictation = Self("toggleDictation", initial: .init(.space, modifiers: [.control, .option]))
     static let cancelDictation = Self("cancelDictation", initial: .init(.escape, modifiers: [.control, .option]))
+    static let captureScreenshot = Self("captureScreenshot", initial: .init(.s, modifiers: [.control, .option]))
 }
 
 @MainActor
@@ -50,6 +51,9 @@ final class SessionController: ObservableObject {
         didSet { UserDefaults.standard.set(cleanUpText, forKey: "cleanUpText") }
     }
     @Published private(set) var accessibilityGranted = TextDelivery.hasAccessibility
+    @Published private(set) var screenCaptureGranted = ScreenshotCapture.hasPermission
+    @Published private(set) var screenshotCount = 0
+    @Published private(set) var screenshotFlash = false
     private var checkedStartupAccess = false
 
     func checkStartupAccess() {
@@ -60,10 +64,15 @@ final class SessionController: ObservableObject {
 
     func refreshAccessibility() {
         accessibilityGranted = TextDelivery.hasAccessibility
+        screenCaptureGranted = ScreenshotCapture.hasPermission
     }
 
     func requestAutomaticPasteAccess() {
         accessibilityGranted = TextDelivery.requestAccessibility()
+    }
+
+    func requestScreenCaptureAccess() {
+        screenCaptureGranted = ScreenshotCapture.requestPermission()
     }
     @Published var useNBWhisper = UserDefaults.standard.object(forKey: "useNBWhisper") as? Bool ?? true {
         didSet {
@@ -77,6 +86,9 @@ final class SessionController: ObservableObject {
     private var cleaner: TextCleaner?
     private var operation: Task<Void, Never>?
     private var timeout: Task<Void, Never>?
+    private var screenshotFlashTask: Task<Void, Never>?
+    private var screenshots: [SessionScreenshot] = []
+    private let screenshotCapture = ScreenshotCapture()
     private let delivery = TextDelivery()
     lazy var panel = RecordingPanel(controller: self)
 
@@ -89,11 +101,43 @@ final class SessionController: ObservableObject {
     var isBusy: Bool { ![.idle, .failed].contains(phase) }
     var canCancel: Bool { [.preparing, .recording, .finishing].contains(phase) }
     var canToggle: Bool { [.idle, .failed, .recording].contains(phase) }
+    var canCaptureScreenshot: Bool { phase == .recording && !preparingFile && !confirmingDiscard }
 
     init() {
         if useNBWhisper { Task { await NBWhisper.shared.warmUp() } }
         KeyboardShortcuts.onKeyUp(for: .toggleDictation) { [weak self] in self?.toggle() }
         KeyboardShortcuts.onKeyUp(for: .cancelDictation) { [weak self] in self?.dismissPanel() }
+        KeyboardShortcuts.onKeyUp(for: .captureScreenshot) { [weak self] in self?.captureScreenshot() }
+    }
+
+    func captureScreenshot() {
+        guard canCaptureScreenshot, let session, let entryID, !screenshotCapture.isActive else { return }
+        if !ScreenshotCapture.hasPermission {
+            screenCaptureGranted = ScreenshotCapture.requestPermission()
+            guard screenCaptureGranted else {
+                message = "Gi Dikta tilgang til Skjermopptak i Systeminnstillinger."
+                return
+            }
+        }
+        screenCaptureGranted = true
+        let timestamp = session.audioSeconds
+        screenshotCapture.begin { [weak self] data in
+            guard let self, let data, self.entryID == entryID,
+                  [.recording, .finishing].contains(self.phase) else { return }
+            guard let saved = self.history.addScreenshot(entryID, data: data, timestamp: timestamp) else { return }
+            self.screenshots.append(saved)
+            self.screenshotCount = self.screenshots.count
+            self.flashScreenshotIndicator()
+        }
+    }
+
+    private func flashScreenshotIndicator() {
+        screenshotFlashTask?.cancel()
+        screenshotFlash = true
+        screenshotFlashTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(650)) } catch { return }
+            self?.screenshotFlash = false
+        }
     }
 
     func toggle() {
@@ -129,6 +173,11 @@ final class SessionController: ObservableObject {
         audioLevel = 0
         progress = 0
         showProgress = false
+        screenshots = []
+        screenshotCount = 0
+        screenshotFlash = false
+        screenshotFlashTask?.cancel()
+        screenshotCapture.cancel()
         preparingFile = source.isFile
         phase = .preparing
         message = source.isFile ? "Klargjør transkripsjon …" : "Klargjør diktasjon …"
@@ -148,6 +197,11 @@ final class SessionController: ObservableObject {
         let (entryID, archive) = history.begin(origin, engine: engine, locale: locale, seconds: seconds,
                                                recordsAudio: !source.isFile)
         self.entryID = entryID
+        if let original {
+            let copied = history.copyScreenshots(from: original, to: entryID)
+            screenshots = copied
+            screenshotCount = copied.count
+        }
         self.cleaner?.cancel()
         let cleaner = cleanUpText && TextCleaner.unavailableReason == nil ? TextCleaner() : nil
         self.cleaner = cleaner
@@ -252,6 +306,7 @@ final class SessionController: ObservableObject {
     private func stop(automaticallyPaste shouldPaste: Bool? = nil, showFileProgress: Bool = false,
                       interruption: String? = nil) {
         guard let session else { return }
+        screenshotCapture.cancel()
         phase = .finishing
         progress = 0
         showProgress = false
@@ -285,11 +340,47 @@ final class SessionController: ObservableObject {
             do {
                 let dictated = try await session.finish()
                 guard self.session === session, self.phase == .finishing else { return }
-                var finalText = dictated
-                if let cleaner, !dictated.isEmpty {
-                    self.message = "Rydder opp teksten …"
-                    finalText = await cleaner.finish(dictated)
-                    guard self.session === session, self.phase == .finishing else { return }
+                let finalText: String
+                let originalText: String?
+                if self.screenshots.isEmpty {
+                    var cleaned = dictated
+                    if let cleaner, !dictated.isEmpty {
+                        self.message = "Rydder opp teksten …"
+                        cleaned = await cleaner.finish(dictated)
+                        guard self.session === session, self.phase == .finishing else { return }
+                    }
+                    finalText = cleaned
+                    originalText = cleaned == dictated ? nil : dictated
+                } else {
+                    let folder = entryID.map { self.history.folder(for: $0) } ?? SessionHistory.directory
+                    let rawBlocks = TranscriptComposer.blocks(pieces: session.timedPieces, screenshots: self.screenshots)
+                    let formattedBlocks: [TranscriptBlock] = rawBlocks.map { block in
+                        switch block {
+                        case .text(let value): return .text(Vocabulary.format(value))
+                        case .screenshot: return block
+                        }
+                    }
+                    let composedOriginal = TranscriptComposer.render(formattedBlocks, folder: folder)
+                    if let cleaner {
+                        self.message = "Rydder opp teksten …"
+                        var cleanedBlocks: [TranscriptBlock] = []
+                        for block in formattedBlocks {
+                            switch block {
+                            case .text(let value):
+                                let cleanedPart = await cleaner.finish(value)
+                                guard self.session === session, self.phase == .finishing else { return }
+                                cleanedBlocks.append(.text(cleanedPart))
+                            case .screenshot:
+                                cleanedBlocks.append(block)
+                            }
+                        }
+                        let composedCleaned = TranscriptComposer.render(cleanedBlocks, folder: folder)
+                        finalText = composedCleaned
+                        originalText = composedCleaned == composedOriginal ? nil : composedOriginal
+                    } else {
+                        finalText = composedOriginal
+                        originalText = nil
+                    }
                 }
                 self.timeout?.cancel()
                 self.progressTask?.cancel()
@@ -297,8 +388,7 @@ final class SessionController: ObservableObject {
                 self.text = finalText
                 if let entryID {
                     let status: HistoryEntry.Status = interruption == nil ? .done : .interrupted
-                    let original = finalText == dictated ? nil : dictated
-                    self.history.finish(entryID, text: finalText, original: original, status: status, note: interruption)
+                    self.history.finish(entryID, text: finalText, original: originalText, status: status, note: interruption)
                 }
                 if finalText.isEmpty {
                     self.message = "Ingen tale oppfattet."
@@ -329,6 +419,10 @@ final class SessionController: ObservableObject {
     }
 
     func dismissPanel() {
+        if screenshotCapture.isActive {
+            screenshotCapture.cancel()
+            return
+        }
         if confirmingDiscard { cancel(); return }
         if phase == .recording, let recordingStartedAt, Date().timeIntervalSince(recordingStartedAt) > 10 {
             confirmingDiscard = true
@@ -346,6 +440,7 @@ final class SessionController: ObservableObject {
 
     func cancel() {
         guard canCancel, let session else { return }
+        screenshotCapture.cancel()
         phase = .cancelling
         operation?.cancel()
         timeout?.cancel()
@@ -368,6 +463,7 @@ final class SessionController: ObservableObject {
 
     private func fail(_ error: Error) {
         guard phase == .preparing || phase == .recording || phase == .finishing else { return }
+        screenshotCapture.cancel()
         phase = .cancelling
         operation?.cancel()
         timeout?.cancel()
@@ -399,6 +495,7 @@ final class SessionController: ObservableObject {
     }
 
     func quit() {
+        screenshotCapture.cancel()
         guard let session else { NSApp.terminate(nil); return }
         operation?.cancel()
         timeout?.cancel()
