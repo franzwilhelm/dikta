@@ -3,7 +3,7 @@ import AudioToolbox
 import Foundation
 
 // Bluetooth microphones deliver pure digital silence while the headset switches
-// mode. Real microphones always carry some noise, so any signal means it is live.
+// mode. Sound on any channel means it is live, since AudioFeed records them all.
 private final class SoundGate: @unchecked Sendable {
     private let lock = NSLock()
     private var open = false
@@ -11,12 +11,9 @@ private final class SoundGate: @unchecked Sendable {
     func opens(on buffer: AVAudioPCMBuffer) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard !open, let channel = buffer.floatChannelData?[0] else { return false }
-        for index in 0..<Int(buffer.frameLength) where abs(channel[index]) > 1e-6 {
-            open = true
-            return true
-        }
-        return false
+        guard !open else { return false }
+        open = (0..<Int(buffer.format.channelCount)).contains { buffer.carriesSound(onChannel: $0) }
+        return open
     }
 }
 

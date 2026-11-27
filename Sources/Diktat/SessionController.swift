@@ -32,6 +32,8 @@ final class SessionController: ObservableObject {
     @Published private(set) var inputDevice: InputDevice?
     @Published private(set) var showBars = false
     private var hearing = false
+    // Whether this session's microphone has delivered anything but digital silence.
+    private var heardSound = false
     private var badgeUntil = Date.distantPast
     private var barsTask: Task<Void, Never>?
     private var progressTask: Task<Void, Never>?
@@ -210,6 +212,7 @@ final class SessionController: ObservableObject {
             self.audioLevel = level
         }
         inputDevice = nil
+        heardSound = false
         // The same quick microphone as last time needs no introduction: go straight to the bars.
         if AudioDevices.lastQuickUID != nil {
             barsTask?.cancel()
@@ -228,6 +231,7 @@ final class SessionController: ObservableObject {
                 self.history.update(entryID, microphone: device.name)
             }
             if hearing {
+                self.heardSound = true
                 self.hearing = true
                 self.updateBars()
             } else if !(familiar && self.showBars) {
@@ -270,6 +274,7 @@ final class SessionController: ObservableObject {
                 let language = selectedLocale == "nb-NO" ? "Norsk bokmål" : "English"
                 self.message = "Lytter · \(language)"
                 if self.useNBWhisper { self.message += " · Whisper · 30 s" }
+                self.watchForSilence(in: session)
             } catch {
                 guard self.session === session, self.phase == .preparing else { return }
                 self.fail(error)
@@ -293,6 +298,18 @@ final class SessionController: ObservableObject {
         showBars = true
     }
 
+    // A familiar microphone goes straight to the bars. One that then delivers only
+    // digital silence gets its icon back, so a dead input shows while recording.
+    private func watchForSilence(in session: SpeechSession) {
+        Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(Self.silenceLimit)) } catch { return }
+            guard let self, self.session === session, self.phase == .recording, !self.heardSound else { return }
+            self.showBadge()
+        }
+    }
+
+    private static let silenceLimit = 3.0
+
     // The microphone stopped by itself. Finish and copy what was heard, but never
     // paste: the user may still be talking, unaware that recording has stopped.
     private func interrupt(_ error: Error) {
@@ -307,6 +324,8 @@ final class SessionController: ObservableObject {
                       interruption: String? = nil) {
         guard let session else { return }
         screenshotCapture.cancel()
+        let recorded = recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+        let silent = !preparingFile && !heardSound && recorded >= Self.silenceLimit
         phase = .finishing
         progress = 0
         showProgress = false
@@ -386,11 +405,19 @@ final class SessionController: ObservableObject {
                 self.progressTask?.cancel()
                 self.progress = 100
                 self.text = finalText
+                // Whisper has nothing to work on, so the session ends at once. Say why.
+                let deadMicrophone = silent && finalText.isEmpty
+                    ? "Mikrofonen ga ingen lyd. Prøv igjen, eller velg en annen mikrofon i Innstillinger." : nil
                 if let entryID {
-                    let status: HistoryEntry.Status = interruption == nil ? .done : .interrupted
-                    self.history.finish(entryID, text: finalText, original: originalText, status: status, note: interruption)
+                    var status: HistoryEntry.Status = interruption == nil ? .done : .interrupted
+                    if deadMicrophone != nil { status = .failed }
+                    self.history.finish(entryID, text: finalText, original: originalText, status: status,
+                                        note: deadMicrophone ?? interruption)
                 }
-                if finalText.isEmpty {
+                if let deadMicrophone {
+                    self.message = deadMicrophone
+                    self.delivery.reset()
+                } else if finalText.isEmpty {
                     self.message = "Ingen tale oppfattet."
                     self.delivery.reset()
                 } else {
@@ -402,7 +429,10 @@ final class SessionController: ObservableObject {
                 }
                 await session.cancel()
                 self.session = nil
-                if let interruption {
+                if deadMicrophone != nil {
+                    self.phase = .failed
+                    self.panel.show()
+                } else if let interruption {
                     // Stay on screen so an unexpected stop is noticed.
                     self.message = "\(interruption) \(self.message)"
                     self.phase = .failed

@@ -41,6 +41,7 @@ Disse punktene er ikke bekreftet gjennom bygg eller kildekodegjennomgang:
 - [ ] Avslutt Dikta med `kill -9` under opptak: økten vises som «Ikke fullført» ved neste start, og lydopptaket kan transkriberes på nytt.
 - [ ] Koble AirPods til og fra flere ganger under opptak, med både Mac-mikrofonen og AirPods valgt: ingen krasj, opptaket fortsetter, eller stopper med beskjed og kopiert tekst.
 - [ ] Bytt mellom Systemstandard og en valgt mikrofon mellom to dikteringer: andre diktering bruker den nye.
+- [ ] Sett inngangsvolumet til null og dikter i fem sekunder: mikrofonikonet erstatter søylene etter tre sekunder, og panelet blir stående med «Mikrofonen ga ingen lyd».
 - [ ] «Kopier siste tekst» virker etter en avbrutt eller feilet senere økt.
 - [ ] Panel vises over fullskjermsapper uten å ta tastaturfokus.
 
@@ -219,3 +220,30 @@ og ventetid må prøves med reell bruk; overlapp garanterer ikke at all tale bli
   bare en fil med riktig størrelse og SHA-256 gjøres tilgjengelig som modell.
 - Ingen testfiler er opprettet. Diagnosekoden er fjernet før release. Feil checksum,
   nettbrudd og selve visningen i innstillingsvinduet er ikke manuelt fremprovosert.
+
+## Stille opptak fra flerkanals lydmotor, 27. november 2026
+
+To økter på 0.11.1 (20 min 30 s og 1 min 27 s) ble lagret som ren digital stillhet
+(-91 dB). Systemloggen viste at lydmotoren leverte tre kanaler fra Mac-mikrofonen,
+først fordi enheten selv meldte tre, senere fordi den gjenbrukte motoren beholdt
+formatet etter at enheten var tilbake på én. `AVAudioConverter` fra tre kanaler
+uten høyttaleroppstilling til mono får kanalkart `[-1]` og skriver bare nuller.
+Søylene og lydporten leste kanal 0 før konverteringen, så panelet viste lyd.
+
+`AudioFeed` mikser nå selv til én kanal (snittet av kanalene som har lyd), og
+omformeren endrer bare takt og sampletype. Det retter også at stereo bare brukte
+venstre kanal.
+
+- `AudioFeed` kjørt utenfor appen med en 440 Hz-tone på 0,3. Toppnivå ut, 0.11.1
+  mot rettingen: tre kanaler med lyd i kanal 0: 0,0 mot 0,3. Åpnet mono, buffere
+  med tre kanaler: 0,0 mot 0,3. Stereo med lyd bare i høyre: 0,0 mot 0,3. 5.1 med
+  lyd bare i venstre: 0,0 mot 0,3. Mono, stereo venstre og stereo begge: 0,3 i begge.
+- Debug- og release-bygget fullførte. Pakken for 0.11.2 ble installert med det
+  genererte installasjonsskriptet over 0.11.1 i `~/Applications`.
+- Én diktering i den installerte 0.11.2 med Mac-mikrofonen: 3,3 sekunder, teksten
+  «Hallo.», lydopptaket hadde toppnivå -26,4 dB, og økten endte som ferdig uten
+  varsel om stille mikrofon.
+- Inngangsvolum null gir ren digital stillhet fra Mac-mikrofonen (-91 dB). Varselet
+  om stille mikrofon er likevel ikke prøvd i appen: tastetrykk kunne ikke sendes
+  fra denne økten (`osascript is not allowed to send keystrokes`, 1002). Se punktet
+  i listen over.

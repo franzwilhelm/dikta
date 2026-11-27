@@ -63,6 +63,14 @@ mange sekunder mens en Bluetooth-enhet bytter modus. Appen velger alltid
 mikrofonen uttrykkelig, også ved Systemstandard, fordi en gjenbrukt motor ellers
 beholder forrige mikrofon.
 
+En lydmotor kan levere flere kanaler enn mikrofonen har, for eksempel tre fra
+Mac-mikrofonen. macOS mikser ikke kanaler ned av seg selv: stereo mister høyre
+kanal, og kanaler uten høyttaleroppstilling blir til stillhet. Dikta mikser derfor
+selv til én kanal, som snittet av kanalene som har lyd, både for mikrofon og
+lydfiler. Lydsøylene viser den samme miksen. Gir mikrofonen bare digital stillhet
+i tre sekunder, vises mikrofonikonet i stedet for søylene, og økten ender med
+«Mikrofonen ga ingen lyd» i stedet for tom tekst.
+
 Kilder og lisenser: [NB-Whisper Medium (Apache 2.0)](https://huggingface.co/NbAiLab/nb-whisper-medium),
 [whisper.cpp (MIT)](https://github.com/ggml-org/whisper.cpp/tree/v1.9.4),
 [Silero VAD](https://huggingface.co/ggml-org/whisper-vad).

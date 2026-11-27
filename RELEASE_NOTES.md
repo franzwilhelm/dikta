@@ -1,6 +1,7 @@
-Raskere skjermbilder under diktasjon — enkeltklikk for å ta et helt vindu.
+Opptak blir ikke lenger stille når Mac-en leverer flere lydkanaler.
 
-- Når du aktiverer skjermbildemodus, lyses vinduet under musepekeren opp. Et enkelt klikk fanger hele vinduet direkte (eller hele skjermen hvis du klikker på skrivebordet).
-- Dra over et område fungerer som før, med rød ramme og omkringliggende kontekst.
+- På 0.11.1 kunne et opptak bli lagret uten lyd, og dermed uten tekst, fordi mikrofonen kom inn med tre kanaler. Dikta mikser nå kanalene til én selv.
+- Lydfiler i stereo transkriberes fra begge kanaler, ikke bare venstre.
+- Gir mikrofonen ingen lyd, viser panelet mikrofonikonet i stedet for lydsøylene etter tre sekunder, og økten ender med «Mikrofonen ga ingen lyd» i stedet for tom tekst.
 
 Nedlastede modeller, innstillinger og tidligere økter beholdes.

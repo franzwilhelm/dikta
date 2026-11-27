@@ -1,10 +1,22 @@
 import AVFoundation
+import Accelerate
 import Foundation
 import Speech
 
 struct DiktatError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
+}
+
+extension AVAudioPCMBuffer {
+    // Real microphones always carry some noise. A channel of pure digital silence
+    // is padding, or a device that is not delivering yet.
+    func carriesSound(onChannel channel: Int) -> Bool {
+        guard frameLength > 0, let samples = floatChannelData?[channel] else { return false }
+        var peak: Float = 0
+        vDSP_maxmgv(samples, stride, &peak, vDSP_Length(frameLength))
+        return peak > 1e-6
+    }
 }
 
 // AVAudioConverter's callback is Sendable; this object owns the buffer only
@@ -51,7 +63,7 @@ final class AudioFeed: @unchecked Sendable {
          level: @escaping @Sendable (Float) -> Void = { _ in },
          consume: @escaping @Sendable (AVAudioPCMBuffer) throws -> Void,
          end: @escaping @Sendable (Error?) -> Void) throws {
-        guard let converter = AVAudioConverter(from: input, to: output) else {
+        guard let converter = Self.converter(at: input.sampleRate, to: output) else {
             throw DiktatError(message: "Mikrofonens lydformat kan ikke konverteres.")
         }
         self.level = level
@@ -59,6 +71,36 @@ final class AudioFeed: @unchecked Sendable {
         self.format = output
         self.consume = consume
         self.end = end
+    }
+
+    // AVAudioConverter does not mix channels down. Stereo loses its right channel,
+    // and channels without a speaker layout (a microphone array, or an engine still
+    // on another device's format) come out silent. The feed mixes to one channel
+    // itself, so the converter only changes sample rate and sample type.
+    private static func converter(at sampleRate: Double, to output: AVAudioFormat) -> AVAudioConverter? {
+        guard let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate,
+                                       channels: 1, interleaved: false) else { return nil }
+        return AVAudioConverter(from: mono, to: output)
+    }
+
+    // The average of the channels that carry sound, in the converter's input
+    // format. Silent channels are left out so they do not turn the others down.
+    private func mixed(_ input: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        if input.format == converter.inputFormat { return input }
+        guard input.format.commonFormat == .pcmFormatFloat32, !input.format.isInterleaved,
+              let channels = input.floatChannelData,
+              let mono = AVAudioPCMBuffer(pcmFormat: converter.inputFormat, frameCapacity: input.frameLength),
+              let mix = mono.floatChannelData?[0] else { return nil }
+        let frames = vDSP_Length(input.frameLength)
+        mono.frameLength = input.frameLength
+        vDSP_vclr(mix, 1, frames)
+        var sounding: Float = 0
+        for channel in 0..<Int(input.format.channelCount) where input.carriesSound(onChannel: channel) {
+            vDSP_vadd(mix, 1, channels[channel], 1, mix, 1, frames)
+            sounding += 1
+        }
+        if sounding > 1 { vDSP_vsdiv(mix, 1, &sounding, mix, 1, frames) }
+        return mono
     }
 
     // Construct this callback outside MainActor. AVAudioNodeTapBlock does not
@@ -71,21 +113,24 @@ final class AudioFeed: @unchecked Sendable {
     func receive(_ input: AVAudioPCMBuffer) {
         lock.lock()
         defer { lock.unlock() }
-        guard !ended else { return }
-        // The input device can change mid-session (e.g. a headset connects); follow its format.
-        if input.format != converter.inputFormat {
-            guard let replacement = AVAudioConverter(from: input.format, to: format) else {
+        guard !ended, input.frameLength > 0 else { return }
+        // The input device can change mid-session (e.g. a headset connects); follow its rate.
+        if input.format.sampleRate != converter.inputFormat.sampleRate {
+            guard let replacement = Self.converter(at: input.format.sampleRate, to: format) else {
                 fail(DiktatError(message: "Mikrofonens lydformat kan ikke konverteres."))
                 return
             }
             converter = replacement
         }
+        guard let input = mixed(input), let samples = input.floatChannelData?[0] else {
+            fail(DiktatError(message: "Mikrofonens lydformat kan ikke konverteres."))
+            return
+        }
         meterSeconds += Double(input.frameLength) / input.format.sampleRate
-        if meterSeconds >= 0.05, let channel = input.floatChannelData?[0], input.frameLength > 0 {
+        if meterSeconds >= 0.05 {
             meterSeconds = 0
-            var sum: Float = 0
-            for i in 0..<Int(input.frameLength) { sum += channel[i] * channel[i] }
-            let rms = sqrt(sum / Float(input.frameLength))
+            var rms: Float = 0
+            vDSP_rmsqv(samples, 1, &rms, vDSP_Length(input.frameLength))
             level(min(1, max(0, (20 * log10(max(rms, 0.00001)) + 60) / 60)))
         }
         let capacity = AVAudioFrameCount(ceil(Double(input.frameLength) * format.sampleRate / input.format.sampleRate)) + 64
